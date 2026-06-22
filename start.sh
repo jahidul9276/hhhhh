@@ -2,6 +2,7 @@
 
 service dbus start
 
+
 pulseaudio \
 --start \
 --system \
@@ -9,16 +10,18 @@ pulseaudio \
 --disable-shm
 
 
-service xrdp start
-
-
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
 
 
-echo "XRDP started"
-echo "Python version:"
+service xrdp start
+
+
+echo "===================="
+echo "XRDP READY"
+echo "Python:"
 python3 --version
+echo "===================="
 
 
 tail -f /var/log/xrdp-sesman.log
