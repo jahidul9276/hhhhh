@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture
 RUN dpkg --add-architecture i386
 
-# Install minimal required packages
+# Install required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -30,11 +30,20 @@ libc6:i386 \
 procps \
 xauth \
 xorg \
+policykit-1 \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
 # Set root password
 RUN echo "root:ja908070" | chpasswd
+
+# Allow root login for XRDP
+RUN sed -i 's/^AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini || \
+    echo "AllowRootLogin=true" >> /etc/xrdp/sesman.ini
+
+# Allow console users
+RUN sed -i 's/^AllowConsole=.*/AllowConsole=true/g' /etc/xrdp/sesman.ini || \
+    echo "AllowConsole=true" >> /etc/xrdp/sesman.ini
 
 # Create X11 configuration
 RUN mkdir -p /etc/X11
@@ -51,19 +60,25 @@ unset XDG_RUNTIME_DIR
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/run/user/0
 export HOME=/root
+export SHELL=/bin/bash
 exec startxfce4
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Fix xrdp configuration - disable ip check
+# Fix xrdp configuration
 RUN sed -i 's/^ip=.*/ip=127.0.0.1/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^port=.*/port=3389/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^crypt_level=.*/crypt_level=low/g' /etc/xrdp/xrdp.ini
 
 # Create necessary directories
 RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/0
 RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus
+RUN chmod 755 /run/user/0
+
+# Create .Xauthority
+RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
 
 # Copy start script
 COPY start.sh /start.sh
