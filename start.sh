@@ -1,14 +1,14 @@
 #!/bin/bash
 
-service dbus start
+set -e
 
-pulseaudio --start \
---system \
---disallow-exit \
---disable-shm
+mkdir -p /run/dbus
+dbus-daemon --system
 
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
+
+pulseaudio --system --disallow-exit --disable-shm &
 
 service xrdp start
 
