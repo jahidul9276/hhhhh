@@ -38,69 +38,14 @@ setup_dirs() {
     chmod 755 /run/user/1000
 }
 
-# Configure sesman
-configure_sesman() {
-    echo "Configuring sesman..."
-    
-    cat > /etc/xrdp/sesman.ini <<'EOF'
-[Globals]
-ListenAddress=127.0.0.1
-ListenPort=3350
-EnableUserWindowManager=true
-UserWindowManager=startxfce4
-DefaultWindowManager=startxfce4
-MaxSessions=10
-
-[Xorg]
-param=Xorg
-param=-config
-param=xrdp/xorg.conf
-param=-noreset
-param=-nolisten
-param=tcp
-param=-logfile
-param=.xorgxrdp.%s.log
-
-[Xvnc]
-param=Xvnc
-param=-bs
-param=-auth
-param=.Xauthority
-param=-geometry
-param=%%GEOMETRY%%
-param=-depth
-param=%%COLORDEPTH%%
-param=-rfbauth
-param=.vncpasswd
-param=-localhost
-param=-dpi
-param=%%DPI%%
-
-[Chansrv]
-param=chansrv
-param=-audio
-param=-videofifo
-param=/tmp/xrdp-video-fifo
-param=-videopidfifo
-param=/tmp/xrdp-video-pid-fifo
-
-[SessionVariables]
-X11DisplayOffset=10
-MaxDisplayNumber=10
-AllowRootLogin=true
-AllowConsole=true
-EnableUserWindowManager=true
-UserWindowManager=startxfce4
-DefaultWindowManager=startxfce4
-FuseMountName=thinclient_drives
-FuseMountPath=/tmp/fuse_mount
-KillDisconnected=false
-DisconnectedTimeLimit=0
-IdleTimeLimit=0
-Policy=Default
-EOF
-
-    echo "sesman configured"
+# Get local IP
+get_ip() {
+    # Try to get IP from container
+    LOCAL_IP=$(ip addr show | grep -E "inet (10\.|172\.|192\.168\.)" | head -1 | awk '{print $2}' | cut -d/ -f1)
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP="127.0.0.1"
+    fi
+    echo "Local IP: $LOCAL_IP"
 }
 
 # Start services
@@ -127,7 +72,8 @@ start_services() {
 start_sesman() {
     echo "Starting xrdp-sesman..."
     
-    /usr/sbin/xrdp-sesman --nodaemon &
+    # Start with explicit bind address
+    /usr/sbin/xrdp-sesman --nodaemon --bind 127.0.0.1 &
     SESMAN_PID=$!
     echo "sesman started with PID: $SESMAN_PID"
     
@@ -150,7 +96,7 @@ monitor_sesman() {
     while true; do
         if ! pgrep -x "xrdp-sesman" > /dev/null; then
             echo "sesman died! Restarting..."
-            /usr/sbin/xrdp-sesman --nodaemon &
+            /usr/sbin/xrdp-sesman --nodaemon --bind 127.0.0.1 &
         fi
         sleep 5
     done
@@ -159,19 +105,24 @@ monitor_sesman() {
 # Start xrdp
 start_xrdp() {
     echo "Starting xrdp on port 3389..."
-    exec /usr/sbin/xrdp --nodaemon
+    
+    # Bind to all interfaces
+    exec /usr/sbin/xrdp --nodaemon --bind 0.0.0.0
 }
 
 # Main
 main() {
+    get_ip
     cleanup
     setup_dirs
-    configure_sesman
     start_services
+    
+    # Ensure xrdp.ini has correct IP
+    sed -i "s/^ip=.*/ip=127.0.0.1/g" /etc/xrdp/xrdp.ini
     
     start_sesman || {
         echo "Failed to start sesman, trying alternative..."
-        /usr/sbin/xrdp-sesman --nodaemon --debug &
+        /usr/sbin/xrdp-sesman --nodaemon --bind 127.0.0.1 --debug &
         sleep 3
     }
     
