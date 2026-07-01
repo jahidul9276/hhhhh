@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture for 32-bit Wine support
 RUN dpkg --add-architecture i386
 
-# Install all required packages (removed software-properties-common)
+# Install all required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -69,15 +69,123 @@ EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Configure xrdp
-RUN sed -i 's/^#.*port=3389/port=3389/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*crypt_level=.*/crypt_level=low/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*ssl_protocols=.*/ssl_protocols=TLSv1.2,TLSv1.3/g' /etc/xrdp/xrdp.ini
+# Create sesman configuration with correct socket path
+RUN cat >/etc/xrdp/sesman.ini <<'EOF'
+[Xorg]
+param=Xorg
+param=-config
+param=xrdp/xorg.conf
+param=-noreset
+param=-nolisten
+param=tcp
+param=-logfile
+param=.xorgxrdp.%s.log
+
+[Xvnc]
+param=Xvnc
+param=-bs
+param=-auth
+param=.Xauthority
+param=-geometry
+param=%%GEOMETRY%%
+param=-depth
+param=%%COLORDEPTH%%
+param=-rfbauth
+param=.vncpasswd
+param=-localhost
+param=-dpi
+param=%%DPI%%
+
+[Chansrv]
+param=chansrv
+param=-audio
+param=-videofifo
+param=/tmp/xrdp-video-fifo
+param=-videopidfifo
+param=/tmp/xrdp-video-pid-fifo
+
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=10
+AllowRootLogin=true
+AllowConsole=true
+EnableUserWindowManager=true
+UserWindowManager=startxfce4
+DefaultWindowManager=startxfce4
+FuseMountName=thinclient_drives
+FuseMountPath=/tmp/fuse_mount
+Autorun=
+KillDisconnected=false
+DisconnectedTimeLimit=0
+IdleTimeLimit=0
+Policy=Default
+EOF
+
+# Create xrdp configuration with correct socket path
+RUN cat >/etc/xrdp/xrdp.ini <<'EOF'
+[Globals]
+ini_version=1
+fork=true
+port=3389
+use_vsock=false
+crypt_level=low
+channel_code=1
+max_bpp=32
+xserverbpp=24
+ssl_protocols=TLSv1.2,TLSv1.3
+ssl_ciphers=HIGH
+enable_fuse=true
+fuse_mount_name=thinclient_drives
+fuse_mount_path=/tmp/fuse_mount
+fuse_allow_other=true
+allow_channels=true
+allow_multimon=true
+bitmap_compression=true
+bulk_compression=true
+hidelogwindow=true
+tcp_send_buffer_bytes=32768
+tcp_recv_buffer_bytes=32768
+
+[Xorg]
+name=Xorg
+lib=libxup.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=20
+
+[Xvnc]
+name=Xvnc
+lib=libvnc.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=1
+
+[XRDP]
+name=XRDP
+lib=libxrdp.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=10
+
+[Chansrv]
+name=Chansrv
+lib=libxrdpchansrv.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=3
+EOF
 
 # Create necessary directories
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/0
-RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/0 /run/xrdp /run/xrdp/sockdir
+RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/xrdp /run/xrdp/sockdir
 
 # Create .Xauthority file
 RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
