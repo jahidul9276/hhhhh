@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture
 RUN dpkg --add-architecture i386
 
-# Install required packages
+# Install required packages (removed policykit-1, added polkitd)
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -30,7 +30,8 @@ libc6:i386 \
 procps \
 xauth \
 xorg \
-policykit-1 \
+polkitd \
+pkexec \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
