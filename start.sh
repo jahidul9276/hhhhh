@@ -12,10 +12,14 @@ pulseaudio --system --disallow-exit --disable-shm &
 
 service xrdp start
 
+echo "======================"
 echo "GLIBC:"
 ldd --version | head -1
 
 echo "Python:"
 python3 --version
 
-tail -f /var/log/xrdp-sesman.log
+echo "XRDP running on port 3389"
+echo "======================"
+
+tail -F /var/log/xrdp.log /var/log/xrdp-sesman.log
