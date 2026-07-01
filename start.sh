@@ -22,16 +22,15 @@ setup_permissions() {
     
     # Create necessary directories
     mkdir -p /run/dbus /var/run/dbus /tmp/.X11-unix /run/user/0
-    mkdir -p /var/run/xrdp /var/run/xrdp-sesman
+    mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/xrdp /run/xrdp/sockdir
     mkdir -p /root/.config/pulse
-    mkdir -p /var/run/xrdp/sockdir
     
     # Set proper permissions
     chmod 1777 /tmp/.X11-unix
     chmod 755 /run/dbus /var/run/dbus
     chmod 755 /var/run/xrdp /var/run/xrdp-sesman
     chmod 755 /run/user/0
-    chmod 755 /var/run/xrdp/sockdir
+    chmod 755 /run/xrdp /run/xrdp/sockdir
     
     # Create pulse cookie
     if [ ! -f /root/.config/pulse/cookie ]; then
@@ -47,7 +46,11 @@ setup_permissions() {
     
     # Remove stale sockets
     rm -f /var/run/xrdp-sesman/sesman.socket 2>/dev/null || true
+    rm -f /run/xrdp/sockdir/sesman.socket 2>/dev/null || true
     rm -f /var/run/xrdp/xrdp.sock 2>/dev/null || true
+    
+    # Create symbolic link for compatibility
+    ln -sf /run/xrdp/sockdir/sesman.socket /var/run/xrdp-sesman/sesman.socket 2>/dev/null || true
     
     log "Permissions setup complete"
 }
@@ -145,124 +148,10 @@ start_xrdp_sesman() {
     # Clean up old socket files
     rm -f /var/run/xrdp-sesman/sesman.pid 2>/dev/null || true
     rm -f /var/run/xrdp-sesman/sesman.socket 2>/dev/null || true
-    rm -f /var/run/xrdp-sesman/sesman.ini 2>/dev/null || true
+    rm -f /run/xrdp/sockdir/sesman.socket 2>/dev/null || true
     
-    # Create sesman configuration if missing
-    cat > /etc/xrdp/sesman.ini <<'EOF'
-[Xorg]
-param=Xorg
-param=-config
-param=xrdp/xorg.conf
-param=-noreset
-param=-nolisten
-param=tcp
-param=-logfile
-param=.xorgxrdp.%s.log
-
-[Xvnc]
-param=Xvnc
-param=-bs
-param=-auth
-param=.Xauthority
-param=-geometry
-param=%%GEOMETRY%%
-param=-depth
-param=%%COLORDEPTH%%
-param=-rfbauth
-param=.vncpasswd
-param=-localhost
-param=-dpi
-param=%%DPI%%
-
-[Chansrv]
-param=chansrv
-param=-audio
-param=-videofifo
-param=/tmp/xrdp-video-fifo
-param=-videopidfifo
-param=/tmp/xrdp-video-pid-fifo
-
-[SessionVariables]
-X11DisplayOffset=10
-MaxDisplayNumber=10
-AllowRootLogin=true
-AllowConsole=true
-EnableUserWindowManager=true
-UserWindowManager=startxfce4
-DefaultWindowManager=startxfce4
-FuseMountName=thinclient_drives
-FuseMountPath=/tmp/fuse_mount
-Autorun=
-KillDisconnected=false
-DisconnectedTimeLimit=0
-IdleTimeLimit=0
-Policy=Default
-EOF
-    
-    # Create xrdp configuration if missing
-    cat > /etc/xrdp/xrdp.ini <<'EOF'
-[Globals]
-ini_version=1
-fork=true
-port=3389
-use_vsock=false
-crypt_level=low
-channel_code=1
-max_bpp=32
-xserverbpp=24
-ssl_protocols=TLSv1.2,TLSv1.3
-ssl_ciphers=HIGH
-enable_fuse=true
-fuse_mount_name=thinclient_drives
-fuse_mount_path=/tmp/fuse_mount
-fuse_allow_other=true
-allow_channels=true
-allow_multimon=true
-bitmap_compression=true
-bulk_compression=true
-hidelogwindow=true
-tcp_send_buffer_bytes=32768
-tcp_recv_buffer_bytes=32768
-
-[Xorg]
-name=Xorg
-lib=libxup.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=20
-
-[Xvnc]
-name=Xvnc
-lib=libvnc.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=1
-
-[XRDP]
-name=XRDP
-lib=libxrdp.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=10
-
-[Chansrv]
-name=Chansrv
-lib=libxrdpchansrv.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=3
-EOF
-    
-    # Start xrdp-sesman in background with debug
-    /usr/sbin/xrdp-sesman --nodaemon --debug &
+    # Start xrdp-sesman with correct socket directory
+    /usr/sbin/xrdp-sesman --nodaemon --config /etc/xrdp/sesman.ini &
     XRDP_SESMAN_PID=$!
     
     sleep 5
@@ -272,11 +161,16 @@ EOF
         log "XRDP session manager started successfully (PID: $XRDP_SESMAN_PID)"
         
         # Check if socket exists
-        if [ -S /var/run/xrdp-sesman/sesman.socket ]; then
-            log "Session manager socket created successfully"
-            ls -la /var/run/xrdp-sesman/
+        if [ -S /run/xrdp/sockdir/sesman.socket ]; then
+            log "Session manager socket created successfully at /run/xrdp/sockdir/sesman.socket"
+            ls -la /run/xrdp/sockdir/
+            
+            # Create symbolic link for compatibility
+            ln -sf /run/xrdp/sockdir/sesman.socket /var/run/xrdp-sesman/sesman.socket
+            log "Created symbolic link for compatibility"
         else
             log "Warning: Session manager socket not found"
+            return 1
         fi
     else
         log "Error: XRDP session manager failed to start"
@@ -294,26 +188,27 @@ start_xrdp() {
     
     # Clean up old pid file
     rm -f /var/run/xrdp/xrdp.pid 2>/dev/null || true
-    rm -f /var/run/xrdp/xrdp.sock 2>/dev/null || true
     
     # Wait for sesman socket to be ready
-    local max_attempts=10
+    local max_attempts=15
     local attempt=0
-    while [ ! -S /var/run/xrdp-sesman/sesman.socket ] && [ $attempt -lt $max_attempts ]; do
-        log "Waiting for sesman socket... (attempt $attempt/$max_attempts)"
+    while [ ! -S /run/xrdp/sockdir/sesman.socket ] && [ $attempt -lt $max_attempts ]; do
+        log "Waiting for sesman socket at /run/xrdp/sockdir/sesman.socket... (attempt $attempt/$max_attempts)"
         sleep 2
         attempt=$((attempt + 1))
     done
     
-    if [ -S /var/run/xrdp-sesman/sesman.socket ]; then
-        log "Sesman socket is ready"
+    if [ -S /run/xrdp/sockdir/sesman.socket ]; then
+        log "Sesman socket is ready at /run/xrdp/sockdir/sesman.socket"
+        # Ensure symlink exists
+        ln -sf /run/xrdp/sockdir/sesman.socket /var/run/xrdp-sesman/sesman.socket
     else
         log "Warning: Sesman socket still not ready, attempting to continue..."
     fi
     
     # Start xrdp in foreground
     log "XRDP listening on port 3389"
-    exec /usr/sbin/xrdp --nodaemon
+    exec /usr/sbin/xrdp --nodaemon --config /etc/xrdp/xrdp.ini
 }
 
 # Health check function
@@ -328,8 +223,8 @@ health_check() {
     fi
     
     # Check socket
-    if [ -S /var/run/xrdp-sesman/sesman.socket ]; then
-        log "Health check: Session manager socket exists ✓"
+    if [ -S /run/xrdp/sockdir/sesman.socket ]; then
+        log "Health check: Session manager socket exists at /run/xrdp/sockdir/sesman.socket ✓"
     else
         log "Health check: Session manager socket missing ✗"
     fi
@@ -351,6 +246,7 @@ main() {
     # Setup environment
     export DISPLAY=:0
     export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
+    export XRDP_SOCKET_PATH=/run/xrdp/sockdir/sesman.socket
     
     # Setup permissions and mounts
     setup_permissions
@@ -367,7 +263,6 @@ main() {
     
     start_xrdp_sesman || {
         log "Error: XRDP session manager failed to start"
-        # Try to fix with alternative method
         log "Attempting alternative start method..."
         /usr/sbin/xrdp-sesman --nodaemon &
         sleep 5
