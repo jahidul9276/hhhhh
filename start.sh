@@ -1,20 +1,32 @@
 #!/bin/bash
-set -e
 
-mkdir -p /run/dbus
-mkdir -p /var/run/xrdp
-mkdir -p /tmp/.X11-unix
+# Fix for xrdp-sesman service
+echo "Starting XRDP services..."
 
-chmod 1777 /tmp/.X11-unix
+# Start dbus if not running
+if ! pgrep -x "dbus-daemon" > /dev/null; then
+    echo "Starting dbus-daemon..."
+    dbus-daemon --system --fork
+fi
 
-rm -f /run/dbus/pid
-rm -f /tmp/.X*-lock
+# Start pulseaudio if not running
+if ! pgrep -x "pulseaudio" > /dev/null; then
+    echo "Starting pulseaudio..."
+    pulseaudio --start --daemonize
+fi
 
-dbus-daemon --system --fork || true
+# Start xrdp-sesman directly (since systemd might not work in container)
+echo "Starting xrdp-sesman..."
+/usr/sbin/xrdp-sesman --nodaemon &
 
-service xrdp-sesman start
-service xrdp start
+# Wait a bit for sesman to start
+sleep 2
 
-echo "XRDP started"
+# Start xrdp
+echo "Starting xrdp..."
+/usr/sbin/xrdp --nodaemon
 
-tail -F /var/log/xrdp.log /var/log/xrdp-sesman.log
+# Keep container running if xrdp fails
+while true; do
+    sleep 60
+done
