@@ -2,10 +2,10 @@ FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Add i386 architecture for 32-bit Wine support
+# Add i386 architecture
 RUN dpkg --add-architecture i386
 
-# Install all required packages
+# Install minimal required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -17,26 +17,17 @@ curl \
 wget \
 nano \
 net-tools \
-polkitd \
-pkexec \
 pulseaudio \
 pulseaudio-utils \
 firefox-esr \
-firejail \
 python3 \
 python3-pip \
-python3-venv \
 build-essential \
 ca-certificates \
 wine \
 wine32 \
 libc6:i386 \
 procps \
-iputils-ping \
-telnet \
-vim \
-htop \
-apt-utils \
 xauth \
 xorg \
 && apt-get clean \
@@ -59,26 +50,25 @@ unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/run/user/0
+export HOME=/root
 exec startxfce4
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Create necessary directories
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/0 /run/xrdp /run/xrdp/sockdir /var/log/xrdp
-RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/xrdp /run/xrdp/sockdir /var/log/xrdp
-RUN chmod 1777 /tmp
+# Fix xrdp configuration - disable ip check
+RUN sed -i 's/^ip=.*/ip=127.0.0.1/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^port=.*/port=3389/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 
-# Copy configuration files
-COPY pulse-client.conf /etc/pulse/client.conf
+# Create necessary directories
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/0
+RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus
+
+# Copy start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Set working directory
-WORKDIR /root
-
-# Expose RDP port
 EXPOSE 3389
 
-# Start script
 CMD ["/start.sh"]
