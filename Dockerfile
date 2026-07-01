@@ -4,7 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN dpkg --add-architecture i386
 
-RUN apt update && apt install -y \
+RUN apt-get update && \
+    apt-get install -y \
     libc6 \
     libc6:i386 \
     xrdp \
@@ -17,7 +18,8 @@ RUN apt update && apt install -y \
     wget \
     nano \
     net-tools \
-    policykit-1 \
+    polkitd \
+    pkexec \
     pulseaudio \
     pulseaudio-utils \
     wine \
@@ -28,11 +30,11 @@ RUN apt update && apt install -y \
     python3-pip \
     python3-venv \
     build-essential \
-    ca-certificates \
-    && apt clean \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Check GLIBC
+# Show GLIBC version
 RUN ldd --version
 
 # Root password
@@ -40,32 +42,30 @@ RUN echo "root:ja908070" | chpasswd
 
 # X11
 RUN mkdir -p /etc/X11 && \
-    printf "allowed_users=anybody\n" > /etc/X11/Xwrapper.config
+    echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 
-# XFCE
-RUN printf "startxfce4\n" > /root/.xsession && \
+# XFCE session
+RUN echo "startxfce4" > /root/.xsession && \
     chmod 700 /root/.xsession
 
 # DBUS
-RUN mkdir -p /var/run/dbus && \
+RUN mkdir -p /run/dbus /var/lib/dbus && \
     dbus-uuidgen > /var/lib/dbus/machine-id
 
 # XRDP
-RUN sed -i 's/crypt_level=high/crypt_level=low/' /etc/xrdp/xrdp.ini && \
-    sed -i 's/security_layer=negotiate/security_layer=rdp/' /etc/xrdp/xrdp.ini && \
-    printf "#!/bin/sh\nexec startxfce4\n" > /etc/xrdp/startwm.sh && \
+RUN sed -i 's/^crypt_level=.*/crypt_level=low/' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^security_layer=.*/security_layer=rdp/' /etc/xrdp/xrdp.ini && \
+    printf '#!/bin/sh\nexec startxfce4\n' > /etc/xrdp/startwm.sh && \
     chmod +x /etc/xrdp/startwm.sh
 
 RUN adduser xrdp ssl-cert
 
-# PulseAudio
+# PulseAudio client
 RUN mkdir -p /etc/pulse && \
-    printf "; This file enables XRDP PulseAudio support for client\n\
-default-server = unix:/run/pulse/native\n\
-autospawn = no\n\
-daemon-binary = /bin/true\n" > /etc/pulse/client.conf
+    printf 'default-server = unix:/run/pulse/native\nautospawn = no\ndaemon-binary = /bin/true\n' > /etc/pulse/client.conf
 
 COPY start.sh /start.sh
+
 RUN chmod +x /start.sh
 
 EXPOSE 3389
