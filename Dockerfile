@@ -32,6 +32,7 @@ xauth \
 xorg \
 polkitd \
 pkexec \
+iproute2 \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
@@ -40,7 +41,7 @@ RUN useradd -m -s /bin/bash xrdpuser && \
     echo "xrdpuser:ja908070" | chpasswd && \
     usermod -aG sudo xrdpuser
 
-# Set root password (for emergency)
+# Set root password
 RUN echo "root:ja908070" | chpasswd
 
 # Create X11 configuration
@@ -66,14 +67,123 @@ EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Configure xrdp
-RUN sed -i 's/^port=.*/port=3389/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^crypt_level=.*/crypt_level=low/g' /etc/xrdp/xrdp.ini
+# Create complete xrdp configuration
+RUN cat > /etc/xrdp/xrdp.ini <<'EOF'
+[Globals]
+ini_version=1
+fork=true
+port=3389
+use_vsock=false
+crypt_level=low
+channel_code=1
+max_bpp=32
+xserverbpp=24
+ssl_protocols=TLSv1.2,TLSv1.3
+ssl_ciphers=HIGH
+enable_fuse=true
+fuse_mount_name=thinclient_drives
+fuse_mount_path=/tmp/fuse_mount
+fuse_allow_other=true
+tcp_send_buffer_bytes=32768
+tcp_recv_buffer_bytes=32768
 
-# Allow root login (just in case)
-RUN sed -i 's/^AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini || \
-    echo "AllowRootLogin=true" >> /etc/xrdp/sesman.ini
+[Xorg]
+name=Xorg
+lib=libxup.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=20
+
+[Xvnc]
+name=Xvnc
+lib=libvnc.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=1
+
+[XRDP]
+name=XRDP
+lib=libxrdp.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=10
+
+[Chansrv]
+name=Chansrv
+lib=libxrdpchansrv.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=3
+EOF
+
+# Create sesman configuration
+RUN cat > /etc/xrdp/sesman.ini <<'EOF'
+[Globals]
+ListenAddress=127.0.0.1
+ListenPort=3350
+EnableUserWindowManager=true
+UserWindowManager=startxfce4
+DefaultWindowManager=startxfce4
+MaxSessions=10
+MaxDisconnections=10
+SessionTimeout=0
+
+[Xorg]
+param=Xorg
+param=-config
+param=xrdp/xorg.conf
+param=-noreset
+param=-nolisten
+param=tcp
+param=-logfile
+param=.xorgxrdp.%s.log
+
+[Xvnc]
+param=Xvnc
+param=-bs
+param=-auth
+param=.Xauthority
+param=-geometry
+param=%%GEOMETRY%%
+param=-depth
+param=%%COLORDEPTH%%
+param=-rfbauth
+param=.vncpasswd
+param=-localhost
+param=-dpi
+param=%%DPI%%
+
+[Chansrv]
+param=chansrv
+param=-audio
+param=-videofifo
+param=/tmp/xrdp-video-fifo
+param=-videopidfifo
+param=/tmp/xrdp-video-pid-fifo
+
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=10
+AllowRootLogin=true
+AllowConsole=true
+EnableUserWindowManager=true
+UserWindowManager=startxfce4
+DefaultWindowManager=startxfce4
+FuseMountName=thinclient_drives
+FuseMountPath=/tmp/fuse_mount
+KillDisconnected=false
+DisconnectedTimeLimit=0
+IdleTimeLimit=0
+Policy=Default
+EOF
 
 # Create necessary directories
 RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/1000
