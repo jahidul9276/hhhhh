@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture for 32-bit Wine support
 RUN dpkg --add-architecture i386
 
-# Install all required packages
+# Install all required packages (removed software-properties-common)
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -36,10 +36,16 @@ iputils-ping \
 telnet \
 vim \
 htop \
-software-properties-common \
 apt-utils \
 systemd \
 systemd-sysv \
+python3-apt \
+apt-transport-https \
+gnupg \
+gnupg2 \
+gnupg-agent \
+dirmngr \
+lsb-release \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
@@ -75,6 +81,9 @@ RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus
 
 # Create .Xauthority file
 RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
+
+# Create pulse cookie directory
+RUN mkdir -p /root/.config/pulse && touch /root/.config/pulse/cookie && chmod 600 /root/.config/pulse/cookie
 
 # Copy configuration files
 COPY pulse-client.conf /etc/pulse/client.conf
