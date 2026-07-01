@@ -1,4 +1,4 @@
-FROM debian:bookworm
+FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -32,53 +32,41 @@ RUN apt update && apt install -y \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-
 # Check GLIBC
 RUN ldd --version
-
 
 # Root password
 RUN echo "root:ja908070" | chpasswd
 
-
 # X11
 RUN mkdir -p /etc/X11 && \
-echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
-
+    printf "allowed_users=anybody\n" > /etc/X11/Xwrapper.config
 
 # XFCE
-RUN echo "startxfce4" > /root/.xsession
-
+RUN printf "startxfce4\n" > /root/.xsession && \
+    chmod 700 /root/.xsession
 
 # DBUS
 RUN mkdir -p /var/run/dbus && \
-dbus-uuidgen > /var/lib/dbus/machine-id
-
+    dbus-uuidgen > /var/lib/dbus/machine-id
 
 # XRDP
 RUN sed -i 's/crypt_level=high/crypt_level=low/' /etc/xrdp/xrdp.ini && \
-sed -i 's/security_layer=negotiate/security_layer=rdp/' /etc/xrdp/xrdp.ini
-
-
-RUN echo "exec startxfce4" > /etc/xrdp/startwm.sh && \
-chmod +x /etc/xrdp/startwm.sh
-
+    sed -i 's/security_layer=negotiate/security_layer=rdp/' /etc/xrdp/xrdp.ini && \
+    printf "#!/bin/sh\nexec startxfce4\n" > /etc/xrdp/startwm.sh && \
+    chmod +x /etc/xrdp/startwm.sh
 
 RUN adduser xrdp ssl-cert
 
-
-# Pulse
+# PulseAudio
 RUN mkdir -p /etc/pulse && \
-cat > /etc/pulse/client.conf <<EOF
-default-server = unix:/run/pulse/native
-autospawn = no
-daemon-binary = /bin/true
-EOF
-
+    printf "; This file enables XRDP PulseAudio support for client\n\
+default-server = unix:/run/pulse/native\n\
+autospawn = no\n\
+daemon-binary = /bin/true\n" > /etc/pulse/client.conf
 
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
-
 
 EXPOSE 3389
 
