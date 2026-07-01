@@ -11,80 +11,139 @@ is_running() {
     pgrep -x "$1" > /dev/null 2>&1
 }
 
+# Function to log with timestamp
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
 # Setup proper permissions
 setup_permissions() {
-    echo "Setting up proper permissions..."
+    log "Setting up proper permissions..."
     
     # Create necessary directories
     mkdir -p /run/dbus /var/run/dbus /tmp/.X11-unix /run/user/0
     mkdir -p /var/run/xrdp /var/run/xrdp-sesman
+    mkdir -p /root/.config/pulse
     
     # Set proper permissions
     chmod 1777 /tmp/.X11-unix
     chmod 755 /run/dbus /var/run/dbus
     chmod 755 /var/run/xrdp /var/run/xrdp-sesman
+    chmod 755 /run/user/0
     
-    # Create pulse cookie directory
-    mkdir -p /root/.config/pulse
-    touch /root/.config/pulse/cookie
+    # Create pulse cookie
+    if [ ! -f /root/.config/pulse/cookie ]; then
+        touch /root/.config/pulse/cookie
+    fi
     chmod 600 /root/.config/pulse/cookie
+    
+    # Create .Xauthority
+    if [ ! -f /root/.Xauthority ]; then
+        touch /root/.Xauthority
+    fi
+    chmod 600 /root/.Xauthority
+    
+    log "Permissions setup complete"
+}
+
+# Fix mount/namespace permissions
+fix_mounts() {
+    log "Fixing mount/namespace permissions..."
+    
+    # Remount /proc and /sys with proper permissions
+    mount -t proc proc /proc -o remount,rw 2>/dev/null || {
+        log "Warning: Could not remount /proc"
+    }
+    
+    mount -t sysfs sys /sys -o remount,rw 2>/dev/null || {
+        log "Warning: Could not remount /sys"
+    }
+    
+    # Create necessary proc entries if they don't exist
+    if [ ! -d /proc/sys ]; then
+        log "Warning: /proc/sys not available"
+    fi
+    
+    log "Mount fixes completed"
 }
 
 # Start D-Bus
 start_dbus() {
-    echo "Starting D-Bus daemon..."
+    log "Starting D-Bus daemon..."
     
     # Kill existing dbus if any
     pkill dbus-daemon 2>/dev/null || true
+    sleep 1
+    
+    # Clean up old pid file
+    rm -f /run/dbus/pid 2>/dev/null || true
+    rm -f /var/run/dbus/pid 2>/dev/null || true
     
     # Start dbus
-    if [ -f /run/dbus/pid ]; then
-        rm -f /run/dbus/pid
+    if ! dbus-daemon --system --fork --print-pid 2>/dev/null; then
+        log "Warning: dbus-daemon failed with print-pid, trying without..."
+        dbus-daemon --system --fork
     fi
     
-    dbus-daemon --system --fork --print-pid 2>/dev/null || \
-    dbus-daemon --system --fork
-    
     sleep 2
-    echo "D-Bus started successfully"
+    
+    # Verify dbus is running
+    if is_running dbus-daemon; then
+        log "D-Bus started successfully"
+    else
+        log "Error: D-Bus failed to start"
+        return 1
+    fi
 }
 
 # Start PulseAudio
 start_pulseaudio() {
-    echo "Starting PulseAudio..."
+    log "Starting PulseAudio..."
     
     # Kill existing pulseaudio
     pkill pulseaudio 2>/dev/null || true
-    
-    # Wait for process to die
     sleep 2
     
-    # Start pulseaudio as system daemon
-    pulseaudio --start --daemonize --system \
+    # Start pulseaudio with multiple fallback methods
+    if ! pulseaudio --start --daemonize --system \
         --exit-idle-time=-1 \
         --realtime \
         --log-level=1 \
-        2>/dev/null || \
-    pulseaudio --start --daemonize --system --exit-idle-time=-1 2>/dev/null || \
-    pulseaudio --start --daemonize
+        --load="module-native-protocol-unix socket=/run/pulse/native" \
+        2>/dev/null; then
+        
+        log "First pulseaudio attempt failed, trying fallback..."
+        if ! pulseaudio --start --daemonize --system --exit-idle-time=-1 2>/dev/null; then
+            log "Second pulseaudio attempt failed, trying simple start..."
+            pulseaudio --start --daemonize 2>/dev/null || {
+                log "Warning: PulseAudio failed to start"
+                return 1
+            }
+        fi
+    fi
     
     sleep 2
     
     # Check if pulseaudio is running
     if is_running pulseaudio; then
-        echo "PulseAudio started successfully"
+        log "PulseAudio started successfully"
     else
-        echo "Warning: PulseAudio failed to start"
+        log "Warning: PulseAudio may not be running properly"
+        return 1
     fi
 }
 
 # Start XRDP session manager
 start_xrdp_sesman() {
-    echo "Starting XRDP session manager..."
+    log "Starting XRDP session manager..."
     
     # Kill existing xrdp-sesman
     pkill xrdp-sesman 2>/dev/null || true
-    sleep 1
+    sleep 2
+    
+    # Clean up old socket
+    rm -f /var/run/xrdp-sesman/sesman.pid 2>/dev/null || true
+    rm -f /var/run/xrdp-sesman/sesman.ini 2>/dev/null || true
     
     # Start xrdp-sesman in background
     /usr/sbin/xrdp-sesman --nodaemon &
@@ -94,38 +153,76 @@ start_xrdp_sesman() {
     
     # Check if xrdp-sesman is running
     if is_running xrdp-sesman; then
-        echo "XRDP session manager started (PID: $XRDP_SESMAN_PID)"
+        log "XRDP session manager started successfully (PID: $XRDP_SESMAN_PID)"
     else
-        echo "Error: XRDP session manager failed to start"
-        exit 1
+        log "Error: XRDP session manager failed to start"
+        return 1
     fi
 }
 
 # Start XRDP
 start_xrdp() {
-    echo "Starting XRDP server..."
+    log "Starting XRDP server..."
     
     # Kill existing xrdp
     pkill xrdp 2>/dev/null || true
-    sleep 1
+    sleep 2
+    
+    # Clean up old socket
+    rm -f /var/run/xrdp/xrdp.pid 2>/dev/null || true
+    rm -f /var/run/xrdp/xrdp.ini 2>/dev/null || true
     
     # Start xrdp in foreground
-    /usr/sbin/xrdp --nodaemon
+    log "XRDP listening on port 3389"
+    exec /usr/sbin/xrdp --nodaemon
+}
+
+# Health check function
+health_check() {
+    log "Running health check..."
+    
+    # Check if xrdp is listening on port 3389
+    if netstat -tlnp 2>/dev/null | grep -q ":3389"; then
+        log "Health check: XRDP is listening on port 3389 ✓"
+    else
+        log "Health check: XRDP is NOT listening on port 3389 ✗"
+    fi
+    
+    # Check running processes
+    for service in xrdp xrdp-sesman pulseaudio dbus-daemon; do
+        if is_running "$service"; then
+            log "Health check: $service is running ✓"
+        else
+            log "Health check: $service is NOT running ✗"
+        fi
+    done
 }
 
 # Main execution
 main() {
-    # Setup permissions first
-    setup_permissions
+    log "Initializing XRDP container..."
     
-    # Mount /proc and /sys with proper permissions if needed
-    mount -t proc proc /proc -o remount,rw 2>/dev/null || true
-    mount -t sysfs sys /sys -o remount,rw 2>/dev/null || true
+    # Setup environment
+    export DISPLAY=:0
+    export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
+    
+    # Setup permissions and mounts
+    setup_permissions
+    fix_mounts
     
     # Start services in correct order
-    start_dbus
-    start_pulseaudio
-    start_xrdp_sesman
+    start_dbus || {
+        log "Critical: D-Bus failed to start, but continuing..."
+    }
+    
+    start_pulseaudio || {
+        log "Warning: PulseAudio failed to start, audio may not work"
+    }
+    
+    start_xrdp_sesman || {
+        log "Error: XRDP session manager failed to start"
+        exit 1
+    }
     
     # Create .Xauthority if it doesn't exist
     if [ ! -f /root/.Xauthority ]; then
@@ -133,18 +230,34 @@ main() {
         chmod 600 /root/.Xauthority
     fi
     
+    # Run health check
+    health_check
+    
+    log "All services started successfully!"
+    log "=========================================="
+    log "XRDP is ready on port 3389"
+    log "Username: root"
+    log "Password: ja908070"
+    log "=========================================="
+    
     # Start XRDP (this will run in foreground)
     start_xrdp
 }
 
-# Trap signals
-trap 'echo "Stopping XRDP services..."; pkill xrdp; pkill xrdp-sesman; pkill pulseaudio; pkill dbus-daemon; exit 0' SIGTERM SIGINT
+# Trap signals for graceful shutdown
+trap 'log "Received shutdown signal. Stopping services..."; \
+      pkill xrdp 2>/dev/null || true; \
+      pkill xrdp-sesman 2>/dev/null || true; \
+      pkill pulseaudio 2>/dev/null || true; \
+      pkill dbus-daemon 2>/dev/null || true; \
+      log "Services stopped. Exiting."; \
+      exit 0' SIGTERM SIGINT
 
 # Run main function
 main
 
 # If xrdp fails, keep container alive for debugging
-echo "XRDP exited. Keeping container alive for debugging..."
+log "XRDP exited unexpectedly. Keeping container alive for debugging..."
 while true; do
     sleep 60
 done
