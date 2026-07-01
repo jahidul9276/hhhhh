@@ -1,12 +1,17 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "XRDP Container Starting - Simple Mode"
+echo "XRDP Container Starting..."
 echo "=========================================="
+
+# Function to log
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
 
 # Clean up everything
 cleanup() {
-    echo "Cleaning up old processes..."
+    log "Cleaning up old processes..."
     pkill xrdp 2>/dev/null || true
     pkill xrdp-sesman 2>/dev/null || true
     pkill Xorg 2>/dev/null || true
@@ -22,45 +27,30 @@ cleanup() {
 
 # Setup directories
 setup_dirs() {
-    echo "Creating directories..."
+    log "Creating directories..."
     mkdir -p /var/run/xrdp
     mkdir -p /var/run/xrdp-sesman
     mkdir -p /run/dbus
     mkdir -p /run/user/0
     mkdir -p /tmp/.X11-unix
     mkdir -p /var/log/xrdp
+    mkdir -p /root/.config/xfce4
+    mkdir -p /root/.cache
+    mkdir -p /root/.local/share
     
     chmod 1777 /tmp/.X11-unix
     chmod 755 /var/run/xrdp
     chmod 755 /var/run/xrdp-sesman
     chmod 755 /run/dbus
     chmod 755 /run/user/0
+    chmod 700 /root/.config
+    chmod 700 /root/.cache
 }
 
-# Start services
-start_services() {
-    echo "Starting services..."
+# Configure sesman for root login
+configure_sesman() {
+    log "Configuring sesman for root login..."
     
-    # Start D-Bus
-    echo "Starting D-Bus..."
-    dbus-daemon --system --fork
-    sleep 1
-    
-    # Start PulseAudio
-    echo "Starting PulseAudio..."
-    pulseaudio --start --daemonize --system --exit-idle-time=-1 2>/dev/null || true
-    sleep 1
-    
-    # Create .Xauthority
-    touch /root/.Xauthority
-    chmod 600 /root/.Xauthority
-}
-
-# Start sesman with proper signal handling
-start_sesman() {
-    echo "Starting xrdp-sesman..."
-    
-    # Create sesman config
     cat > /etc/xrdp/sesman.ini <<'EOF'
 [Xorg]
 param=Xorg
@@ -112,37 +102,13 @@ IdleTimeLimit=0
 Policy=Default
 EOF
 
-    # Start sesman with exec to keep it in foreground
-    /usr/sbin/xrdp-sesman --nodaemon &
-    SESMAN_PID=$!
-    echo "sesman started with PID: $SESMAN_PID"
-    
-    # Wait for socket
-    echo "Waiting for sesman socket..."
-    for i in {1..20}; do
-        if [ -S /var/run/xrdp-sesman/sesman.socket ]; then
-            echo "✓ sesman socket created at /var/run/xrdp-sesman/sesman.socket"
-            return 0
-        fi
-        sleep 1
-    done
-    
-    # Alternative socket location
-    if [ -S /run/xrdp/sockdir/sesman.socket ]; then
-        echo "✓ sesman socket created at /run/xrdp/sockdir/sesman.socket"
-        ln -sf /run/xrdp/sockdir/sesman.socket /var/run/xrdp-sesman/sesman.socket
-        return 0
-    fi
-    
-    echo "✗ Failed to create sesman socket"
-    return 1
+    log "sesman configured for root login"
 }
 
-# Start xrdp
-start_xrdp() {
-    echo "Starting xrdp on port 3389..."
+# Configure xrdp
+configure_xrdp() {
+    log "Configuring xrdp..."
     
-    # Create xrdp config
     cat > /etc/xrdp/xrdp.ini <<'EOF'
 [Globals]
 ini_version=1
@@ -154,6 +120,11 @@ channel_code=1
 max_bpp=32
 xserverbpp=24
 ssl_protocols=TLSv1.2,TLSv1.3
+ssl_ciphers=HIGH
+enable_fuse=true
+fuse_mount_name=thinclient_drives
+fuse_mount_path=/tmp/fuse_mount
+fuse_allow_other=true
 
 [Xorg]
 name=Xorg
@@ -192,34 +163,83 @@ port=-1
 code=3
 EOF
 
-    # Start xrdp in foreground
-    exec /usr/sbin/xrdp --nodaemon
+    log "xrdp configured"
+}
+
+# Start services
+start_services() {
+    log "Starting services..."
+    
+    # Start D-Bus
+    log "Starting D-Bus..."
+    dbus-daemon --system --fork
+    sleep 2
+    
+    # Start PulseAudio
+    log "Starting PulseAudio..."
+    pulseaudio --start --daemonize --system --exit-idle-time=-1 2>/dev/null || true
+    sleep 2
+    
+    # Create .Xauthority
+    touch /root/.Xauthority
+    chmod 600 /root/.Xauthority
+}
+
+# Start sesman
+start_sesman() {
+    log "Starting xrdp-sesman..."
+    
+    # Start sesman
+    /usr/sbin/xrdp-sesman --nodaemon &
+    SESMAN_PID=$!
+    log "sesman started with PID: $SESMAN_PID"
+    
+    # Wait for socket
+    log "Waiting for sesman socket..."
+    for i in {1..20}; do
+        if [ -S /var/run/xrdp-sesman/sesman.socket ]; then
+            log "✓ sesman socket created at /var/run/xrdp-sesman/sesman.socket"
+            return 0
+        fi
+        sleep 1
+    done
+    
+    log "✗ Failed to create sesman socket"
+    return 1
 }
 
 # Monitor sesman
 monitor_sesman() {
     while true; do
         if ! pgrep -x "xrdp-sesman" > /dev/null; then
-            echo "sesman died! Restarting..."
+            log "sesman died! Restarting..."
             /usr/sbin/xrdp-sesman --nodaemon &
         fi
         sleep 5
     done
 }
 
+# Start xrdp
+start_xrdp() {
+    log "Starting xrdp on port 3389..."
+    exec /usr/sbin/xrdp --nodaemon
+}
+
 # Main
 main() {
-    echo "=========================================="
+    log "=========================================="
+    log "Initializing XRDP Container"
+    log "=========================================="
     
     cleanup
     setup_dirs
-    
-    # Start services
+    configure_sesman
+    configure_xrdp
     start_services
     
     # Start sesman
     start_sesman || {
-        echo "Failed to start sesman, trying alternative..."
+        log "Failed to start sesman, trying alternative..."
         /usr/sbin/xrdp-sesman --nodaemon --debug &
         sleep 3
     }
@@ -227,18 +247,20 @@ main() {
     # Start monitor in background
     monitor_sesman &
     
-    echo "=========================================="
-    echo "XRDP Ready!"
-    echo "Username: root"
-    echo "Password: ja908070"
-    echo "=========================================="
+    log "=========================================="
+    log "XRDP Ready!"
+    log "Username: root"
+    log "Password: ja908070"
+    log "=========================================="
+    log "Port: 3389"
+    log "=========================================="
     
     # Start xrdp
     start_xrdp
 }
 
 # Trap signals
-trap 'echo "Stopping services..."; pkill xrdp-sesman; pkill xrdp; exit 0' SIGTERM SIGINT
+trap 'log "Stopping services..."; pkill xrdp-sesman; pkill xrdp; exit 0' SIGTERM SIGINT
 
 # Run main
 main
