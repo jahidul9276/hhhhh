@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture
 RUN dpkg --add-architecture i386
 
-# Install required packages (removed policykit-1, added polkitd)
+# Install required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -37,14 +37,6 @@ pkexec \
 
 # Set root password
 RUN echo "root:ja908070" | chpasswd
-
-# Allow root login for XRDP
-RUN sed -i 's/^AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini || \
-    echo "AllowRootLogin=true" >> /etc/xrdp/sesman.ini
-
-# Allow console users
-RUN sed -i 's/^AllowConsole=.*/AllowConsole=true/g' /etc/xrdp/sesman.ini || \
-    echo "AllowConsole=true" >> /etc/xrdp/sesman.ini
 
 # Create X11 configuration
 RUN mkdir -p /etc/X11
