@@ -4,14 +4,9 @@ echo "=========================================="
 echo "XRDP Container Starting..."
 echo "=========================================="
 
-# Function to log
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
-# Clean up everything
+# Clean up
 cleanup() {
-    log "Cleaning up old processes..."
+    echo "Cleaning up old processes..."
     pkill xrdp 2>/dev/null || true
     pkill xrdp-sesman 2>/dev/null || true
     pkill Xorg 2>/dev/null || true
@@ -22,12 +17,11 @@ cleanup() {
     rm -f /var/run/xrdp-sesman/sesman.pid 2>/dev/null || true
     rm -f /var/run/xrdp-sesman/sesman.socket 2>/dev/null || true
     rm -f /tmp/.X11-unix/X0 2>/dev/null || true
-    rm -f /var/run/dbus/pid 2>/dev/null || true
 }
 
 # Setup directories
 setup_dirs() {
-    log "Creating directories..."
+    echo "Creating directories..."
     mkdir -p /var/run/xrdp
     mkdir -p /var/run/xrdp-sesman
     mkdir -p /run/dbus
@@ -47,11 +41,29 @@ setup_dirs() {
     chmod 700 /root/.cache
 }
 
-# Configure sesman for root login
+# Create complete sesman configuration
 configure_sesman() {
-    log "Configuring sesman for root login..."
+    echo "Creating complete sesman configuration..."
     
+    # Remove old config
+    rm -f /etc/xrdp/sesman.ini
+    
+    # Create new config with ALL settings
     cat > /etc/xrdp/sesman.ini <<'EOF'
+[Globals]
+ListenAddress=127.0.0.1
+ListenPort=3350
+EnableUserWindowManager=true
+UserWindowManager=startxfce4
+DefaultWindowManager=startxfce4
+MaxSessions=10
+MaxDisconnections=10
+SessionTimeout=0
+KillDisconnected=false
+DisconnectedTimeLimit=0
+IdleTimeLimit=0
+Policy=Default
+
 [Xorg]
 param=Xorg
 param=-config
@@ -102,12 +114,16 @@ IdleTimeLimit=0
 Policy=Default
 EOF
 
-    log "sesman configured for root login"
+    echo "sesman configuration created with AllowRootLogin=true"
+    
+    # Verify config
+    echo "Verifying configuration..."
+    grep -E "AllowRootLogin|AllowConsole|UserWindowManager" /etc/xrdp/sesman.ini
 }
 
-# Configure xrdp
+# Create complete xrdp configuration
 configure_xrdp() {
-    log "Configuring xrdp..."
+    echo "Creating complete xrdp configuration..."
     
     cat > /etc/xrdp/xrdp.ini <<'EOF'
 [Globals]
@@ -163,20 +179,20 @@ port=-1
 code=3
 EOF
 
-    log "xrdp configured"
+    echo "xrdp configuration created"
 }
 
 # Start services
 start_services() {
-    log "Starting services..."
+    echo "Starting services..."
     
     # Start D-Bus
-    log "Starting D-Bus..."
+    echo "Starting D-Bus..."
     dbus-daemon --system --fork
     sleep 2
     
     # Start PulseAudio
-    log "Starting PulseAudio..."
+    echo "Starting PulseAudio..."
     pulseaudio --start --daemonize --system --exit-idle-time=-1 2>/dev/null || true
     sleep 2
     
@@ -185,26 +201,26 @@ start_services() {
     chmod 600 /root/.Xauthority
 }
 
-# Start sesman
+# Start sesman with debug
 start_sesman() {
-    log "Starting xrdp-sesman..."
+    echo "Starting xrdp-sesman..."
     
-    # Start sesman
-    /usr/sbin/xrdp-sesman --nodaemon &
+    # Start with debug and force config
+    /usr/sbin/xrdp-sesman --nodaemon --config /etc/xrdp/sesman.ini &
     SESMAN_PID=$!
-    log "sesman started with PID: $SESMAN_PID"
+    echo "sesman started with PID: $SESMAN_PID"
     
     # Wait for socket
-    log "Waiting for sesman socket..."
-    for i in {1..20}; do
+    echo "Waiting for sesman socket..."
+    for i in {1..30}; do
         if [ -S /var/run/xrdp-sesman/sesman.socket ]; then
-            log "✓ sesman socket created at /var/run/xrdp-sesman/sesman.socket"
+            echo "✓ sesman socket created at /var/run/xrdp-sesman/sesman.socket"
             return 0
         fi
         sleep 1
     done
     
-    log "✗ Failed to create sesman socket"
+    echo "✗ Failed to create sesman socket"
     return 1
 }
 
@@ -212,8 +228,8 @@ start_sesman() {
 monitor_sesman() {
     while true; do
         if ! pgrep -x "xrdp-sesman" > /dev/null; then
-            log "sesman died! Restarting..."
-            /usr/sbin/xrdp-sesman --nodaemon &
+            echo "sesman died! Restarting..."
+            /usr/sbin/xrdp-sesman --nodaemon --config /etc/xrdp/sesman.ini &
         fi
         sleep 5
     done
@@ -221,15 +237,13 @@ monitor_sesman() {
 
 # Start xrdp
 start_xrdp() {
-    log "Starting xrdp on port 3389..."
-    exec /usr/sbin/xrdp --nodaemon
+    echo "Starting xrdp on port 3389..."
+    exec /usr/sbin/xrdp --nodaemon --config /etc/xrdp/xrdp.ini
 }
 
 # Main
 main() {
-    log "=========================================="
-    log "Initializing XRDP Container"
-    log "=========================================="
+    echo "=========================================="
     
     cleanup
     setup_dirs
@@ -237,30 +251,29 @@ main() {
     configure_xrdp
     start_services
     
-    # Start sesman
+    # Show config for debugging
+    echo "=========================================="
+    echo "SESMAN CONFIGURATION:"
+    cat /etc/xrdp/sesman.ini | grep -E "AllowRootLogin|AllowConsole|UserWindowManager|Policy"
+    echo "=========================================="
+    
     start_sesman || {
-        log "Failed to start sesman, trying alternative..."
+        echo "Failed to start sesman, trying alternative..."
         /usr/sbin/xrdp-sesman --nodaemon --debug &
         sleep 3
     }
     
-    # Start monitor in background
     monitor_sesman &
     
-    log "=========================================="
-    log "XRDP Ready!"
-    log "Username: root"
-    log "Password: ja908070"
-    log "=========================================="
-    log "Port: 3389"
-    log "=========================================="
+    echo "=========================================="
+    echo "XRDP Ready!"
+    echo "Username: root"
+    echo "Password: ja908070"
+    echo "=========================================="
     
-    # Start xrdp
     start_xrdp
 }
 
-# Trap signals
-trap 'log "Stopping services..."; pkill xrdp-sesman; pkill xrdp; exit 0' SIGTERM SIGINT
+trap 'echo "Stopping services..."; pkill xrdp-sesman; pkill xrdp; exit 0' SIGTERM SIGINT
 
-# Run main
 main
