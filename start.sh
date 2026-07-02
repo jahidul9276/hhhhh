@@ -11,12 +11,16 @@ echo "========================================="
 # ============================================
 echo "=== COMPLETE AUTHORIZATION BYPASS ==="
 
+# Ensure directories exist
+mkdir -p /etc/xrdp
+mkdir -p /etc/polkit-1/localauthority/50-local.d/
+mkdir -p /etc/pam.d
+
 # Remove ALL security policies
 rm -f /etc/polkit-1/localauthority/50-local.d/*.pkla 2>/dev/null || true
 rm -f /etc/polkit-1/localauthority/10-vendor.d/*.pkla 2>/dev/null || true
 
 # Create new policy allowing everything
-mkdir -p /etc/polkit-1/localauthority/50-local.d/
 cat > /etc/polkit-1/localauthority/50-local.d/99-xrdp.pkla <<'POLKITEOF'
 [Allow xrdp]
 Identity=unix-user:*
@@ -26,7 +30,26 @@ ResultInactive=yes
 ResultActive=yes
 POLKITEOF
 
-# Force sesman settings with ALL root options
+# CRITICAL: Set up PAM to allow ALL users without authentication
+cat > /etc/pam.d/xrdp-sesman <<'PAMEOF'
+#%PAM-1.0
+auth        required      pam_permit.so
+auth        required      pam_env.so
+account     required      pam_permit.so
+session     required      pam_permit.so
+session     optional      pam_motd.so
+session     optional      pam_mail.so
+PAMEOF
+
+cat > /etc/pam.d/xrdp <<'PAMEOF'
+#%PAM-1.0
+auth        required      pam_permit.so
+auth        required      pam_env.so
+account     required      pam_permit.so
+session     required      pam_permit.so
+PAMEOF
+
+# Force sesman settings with DisableAuthentication=true
 cat > /etc/xrdp/sesman.ini <<'SESMANEOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -147,54 +170,19 @@ XRDPEOF
 
 echo "✓ All configurations bypassed"
 
-# Setup mount namespace and permissions
-echo "Setting up mount namespace permissions..."
-
-# Create all necessary directories
+# Setup directories with proper permissions
+echo "Setting up directories..."
 mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
-mkdir -p /root/.config/pulse /tmp/.X11-unix /run/user/0
+mkdir -p /home/xrdpuser/.config/pulse /tmp/.X11-unix /run/user/1000 /run/user/0
 mkdir -p /tmp/thinclient_drives /var/lib/xrdp /var/log/xrdp
-mkdir -p /proc /sys /dev /dev/shm
 chmod 1777 /tmp/.X11-unix
-chmod 700 /run/user/0
+chmod 700 /run/user/1000 /run/user/0 2>/dev/null || true
 chmod 755 /var/run/xrdp /var/run/xrdp-sesman /tmp/thinclient_drives
 
-# Mount proc and sys
-if ! mountpoint -q /proc; then
-    mount -t proc proc /proc 2>/dev/null || true
-fi
-
-if ! mountpoint -q /sys; then
-    mount -t sysfs sys /sys 2>/dev/null || true
-fi
-
-if ! mountpoint -q /dev; then
-    mount -t devtmpfs dev /dev 2>/dev/null || true
-fi
-
-if ! mountpoint -q /dev/shm; then
-    mount -t tmpfs tmpfs /dev/shm 2>/dev/null || true
-fi
-
-# Setup /dev entries
-if [ ! -e /dev/tty ]; then
-    mknod -m 666 /dev/tty c 5 0 2>/dev/null || true
-fi
-
-if [ ! -e /dev/null ]; then
-    mknod -m 666 /dev/null c 1 3 2>/dev/null || true
-fi
-
-if [ ! -e /dev/zero ]; then
-    mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
-fi
-
-if ! mountpoint -q /dev/pts; then
-    mount -t devpts devpts /dev/pts 2>/dev/null || true
-fi
-
-# Create Xauthority
-touch /root/.Xauthority && chmod 600 /root/.Xauthority
+# Create Xauthority files
+touch /root/.Xauthority /home/xrdpuser/.Xauthority 2>/dev/null || true
+chmod 600 /root/.Xauthority /home/xrdpuser/.Xauthority 2>/dev/null || true
+chown xrdpuser:xrdpuser /home/xrdpuser/.Xauthority 2>/dev/null || true
 
 # Clean up stale files
 echo "Cleaning up stale files..."
@@ -209,8 +197,6 @@ pkill -x pulseaudio 2>/dev/null || true
 pkill -x xrdp-sesman 2>/dev/null || true
 pkill -x xrdp 2>/dev/null || true
 pkill -x Xorg 2>/dev/null || true
-pkill -x startxfce4 2>/dev/null || true
-pkill -x xfce4-session 2>/dev/null || true
 sleep 3
 
 # Start dbus
@@ -224,7 +210,6 @@ echo "[2/5] Starting pulseaudio..."
 export PULSE_RUNTIME_PATH=/run/pulse
 pulseaudio --start --daemonize --exit-idle-time=-1 --disable-shm=yes --realtime=no 2>/dev/null || echo "⚠ Pulseaudio not available"
 sleep 2
-echo "✓ pulseaudio configured"
 
 # Start xrdp-sesman
 echo "[3/5] Starting xrdp-sesman..."
@@ -263,7 +248,13 @@ echo "[5/5] XRDP Server ready!"
 echo "========================================="
 echo "✓ XRDP Server is ready!"
 echo "  Connect to: localhost:3389"
+echo ""
+echo "  OPTION 1 - Login with root user:"
 echo "  Username: root"
+echo "  Password: ja908070"
+echo ""
+echo "  OPTION 2 - Login with non-root user:"
+echo "  Username: xrdpuser"
 echo "  Password: ja908070"
 echo "========================================="
 echo ""
@@ -276,8 +267,8 @@ echo "========================================="
 echo ""
 echo "Session Information:"
 echo "  Display: :10"
-echo "  Xauthority: /root/.Xauthority"
-echo "  Runtime dir: /run/user/0"
+echo "  Xauthority: /home/xrdpuser/.Xauthority"
+echo "  Runtime dir: /run/user/1000"
 echo "  Pulse socket: /run/pulse/native"
 echo "  DBus socket: /run/dbus/system_bus_socket"
 echo "  SSL Certificate: /etc/xrdp/xrdp-cert.pem"
