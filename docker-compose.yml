@@ -8,38 +8,24 @@ services:
       - "3389:3389"
     restart: unless-stopped
     environment:
-      - DISPLAY=:0
+      - DISPLAY=:10
       - XDG_RUNTIME_DIR=/run/user/0
       - PULSE_RUNTIME_PATH=/run/pulse
       - PULSE_SERVER=unix:/run/pulse/native
       - HOME=/root
       - USER=root
-      - ENABLE_FUSE=1
+      - XAUTHORITY=/root/.Xauthority
     volumes:
-      # X11 socket
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      # Persistent data
       - xrdp-data:/var/lib/xrdp
-      # Mount for shared drives
-      - /mnt:/mnt:ro
-      - ./shared:/shared:rw
-      # FUSE mount point
-      - thinclient-drives:/tmp/thinclient_drives
     cap_add:
       - SYS_ADMIN
       - DAC_READ_SEARCH
       - NET_ADMIN
       - IPC_LOCK
-      - SETUID
-      - SETGID
-      - SYS_PTRACE
-      - MKNOD
     security_opt:
       - apparmor:unconfined
       - seccomp=unconfined
-    devices:
-      - /dev/fuse:/dev/fuse:rw
-      - /dev/dri:/dev/dri:rw
     tmpfs:
       - /run:exec
       - /tmp:exec
@@ -48,8 +34,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
 volumes:
   xrdp-data:
-  thinclient-drives:
