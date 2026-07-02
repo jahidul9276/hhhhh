@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture for 32-bit support
 RUN dpkg --add-architecture i386
 
-# Install all required packages - REMOVED DUPLICATE 'certificates'
+# Install all required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -69,7 +69,7 @@ RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 # Set default session
 RUN echo "xfce4-session" > /root/.xsession
 
-# CRITICAL: Configure xrdp for Windows 11 compatibility
+# CRITICAL FIX: Complete xrdp configuration with proper authorization
 RUN cat >/etc/xrdp/xrdp.ini <<'EOF'
 [Globals]
 ini_version=1
@@ -83,25 +83,22 @@ crypt_level=high
 max_bpp=32
 xserverbpp=32
 codecs=
+; CRITICAL: Allow root login
 allow_root=true
 allow_console=true
 enable_token_login=false
 disable_root_login=false
-# Windows 11 compatibility settings
+; Windows 11 compatibility settings
 rdp_ssl=yes
 ssl_cert_file=/etc/xrdp/xrdp-cert.pem
 ssl_key_file=/etc/xrdp/xrdp-key.pem
 ssl_verify=no
-ssl_ciphers=ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384
 rdp_use_ssl=yes
 crypto_use_fips=false
-; Network settings for Windows 11
 tcp_send_buffer_bytes=262144
 tcp_recv_buffer_bytes=262144
 max_connections=100
-; Enable RDP8.0 features
 rdp_enhanced_security=yes
-; Force TLS 1.2 for Windows 11
 tls_min_version=1.2
 tls_max_version=1.3
 
@@ -147,12 +144,12 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 EOF
 
-# Generate SSL certificates for Windows 11 compatibility
+# Generate SSL certificates
 RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/xrdp/xrdp-key.pem -out /etc/xrdp/xrdp-cert.pem -days 365 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" && \
     chmod 600 /etc/xrdp/xrdp-key.pem && \
     chmod 644 /etc/xrdp/xrdp-cert.pem
 
-# CRITICAL: Configure sesman for Windows 11
+# CRITICAL FIX: Complete sesman configuration with ALLOW root
 RUN cat >/etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -160,18 +157,19 @@ ListenPort=3350
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
-SessionVariables=XDG_CURRENT_DESKTOP=XFCE,XDG_MENU_PREFIX=xfce-,XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg,XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
+; CRITICAL: These are the key settings for root login
 AllowRootLogin=true
 AllowConsoleLogin=true
 RootLoginAllowed=true
-DisableAuthentication=false
-# Windows 11 compatibility
+; Disable authentication for root
+DisableAuthentication=true
 EnableRemoteLogin=true
+; Session settings
 SessionTimeout=0
 DisconnectedTimeLimit=0
 IdleTimeLimit=0
 KillDisconnected=false
-# Use Xorg for better compatibility
+; Display settings
 XDisplay=10
 DisplayOffset=10
 MaxDisplayNumber=50
@@ -199,7 +197,7 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 EOF
 
-# Create Xorg configuration for better Windows 11 compatibility
+# Create Xorg configuration
 RUN mkdir -p /etc/X11/xorg.conf.d
 RUN cat >/etc/X11/xorg.conf.d/99-dummy.conf <<'EOF'
 Section "Device"
@@ -243,10 +241,10 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# Create xrdp startup script
+# CRITICAL FIX: Create startwm.sh with proper environment
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
-# XRDP startwm.sh for XFCE with Windows 11 compatibility
+# XRDP startwm.sh - Complete fix for root authorization
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 export XDG_CURRENT_DESKTOP=XFCE
@@ -311,7 +309,6 @@ EOF
 # Create pulse client configuration
 RUN mkdir -p /etc/pulse
 RUN cat >/etc/pulse/client.conf <<'EOF'
-# PulseAudio client configuration for container
 default-server = /run/pulse/native
 autospawn = no
 daemon-binary = /usr/bin/pulseaudio
@@ -321,7 +318,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# Create start script with Windows 11 compatibility
+# CRITICAL FIX: Create start script with complete authorization fix
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -330,6 +327,22 @@ echo "========================================="
 echo "Starting XRDP Container Services"
 echo "Container ID: $(hostname)"
 echo "========================================="
+
+# CRITICAL: Fix authorization before starting
+echo "Fixing root authorization..."
+
+# Ensure sesman allows root login
+sed -i 's/^.*AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini
+sed -i 's/^.*RootLoginAllowed=.*/RootLoginAllowed=true/g' /etc/xrdp/sesman.ini
+sed -i 's/^.*AllowConsoleLogin=.*/AllowConsoleLogin=true/g' /etc/xrdp/sesman.ini
+sed -i 's/^.*DisableAuthentication=.*/DisableAuthentication=true/g' /etc/xrdp/sesman.ini
+
+# Ensure xrdp allows root
+sed -i 's/^.*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
+sed -i 's/^.*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
+sed -i 's/^.*disable_root_login=.*/disable_root_login=false/g' /etc/xrdp/xrdp.ini
+
+echo "✓ Authorization configured for root"
 
 # Setup mount namespace and permissions
 echo "Setting up mount namespace permissions..."
@@ -379,11 +392,6 @@ if ! mountpoint -q /dev/pts; then
     mount -t devpts devpts /dev/pts
 fi
 
-# Setup /proc/sys/fs/binfmt_misc for wine
-if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
-    mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
-fi
-
 # Create Xauthority if missing
 touch /root/.Xauthority && chmod 600 /root/.Xauthority
 
@@ -417,8 +425,13 @@ pulseaudio --start --daemonize --exit-idle-time=-1 --disable-shm=yes --realtime=
 sleep 2
 echo "✓ pulseaudio configured"
 
-# Start xrdp-sesman
-echo "[3/5] Starting xrdp-sesman..."
+# CRITICAL: Start xrdp-sesman with root authorization
+echo "[3/5] Starting xrdp-sesman with root authorization..."
+# Show sesman configuration
+echo "Sesman configuration:"
+grep -E "AllowRootLogin|RootLoginAllowed|DisableAuthentication" /etc/xrdp/sesman.ini
+
+# Start sesman
 /usr/sbin/xrdp-sesman --nodaemon &
 SESMAN_PID=$!
 sleep 5
@@ -429,7 +442,7 @@ else
     echo "✗ ERROR: xrdp-sesman failed to start"
     echo "Checking sesman log..."
     if [ -f /var/log/xrdp-sesman.log ]; then
-        cat /var/log/xrdp-sesman.log
+        tail -20 /var/log/xrdp-sesman.log
     else
         echo "No sesman log found"
     fi
@@ -452,18 +465,18 @@ echo ""
 
 echo "[5/5] XRDP Server ready!"
 echo "========================================="
-echo "✓ XRDP Server is ready for Windows 11!"
+echo "✓ XRDP Server is ready!"
 echo "  Connect to: localhost:3389"
 echo "  Username: root"
 echo "  Password: ja908070"
 echo "  Session: Xorg (Display :10)"
 echo "========================================="
 echo ""
-echo "Windows 11 Connection Settings:"
-echo "  - Use RDP Client (mstsc.exe)"
-echo "  - Allow TLS 1.2/1.3"
-echo "  - Ignore certificate warnings"
-echo "  - Use 32-bit color depth"
+echo "Authorization Status:"
+echo "  AllowRootLogin: $(grep AllowRootLogin /etc/xrdp/sesman.ini | tail -1)"
+echo "  RootLoginAllowed: $(grep RootLoginAllowed /etc/xrdp/sesman.ini | tail -1)"
+echo "  DisableAuthentication: $(grep DisableAuthentication /etc/xrdp/sesman.ini | tail -1)"
+echo "  allow_root: $(grep allow_root /etc/xrdp/xrdp.ini | tail -1)"
 echo "========================================="
 echo ""
 echo "Session Information:"
@@ -473,11 +486,6 @@ echo "  Runtime dir: /run/user/0"
 echo "  Pulse socket: /run/pulse/native"
 echo "  DBus socket: /run/dbus/system_bus_socket"
 echo "  SSL Certificate: /etc/xrdp/xrdp-cert.pem"
-echo ""
-echo "Mount Information:"
-echo "  /proc: $(mount | grep /proc | head -1)"
-echo "  /sys: $(mount | grep /sys | head -1)"
-echo "  /dev: $(mount | grep /dev | head -1)"
 echo ""
 echo "To monitor logs:"
 echo "  docker exec -it xrdp tail -f /var/log/xrdp.log"
@@ -491,38 +499,78 @@ EOF
 
 RUN chmod +x /start.sh
 
-# Create additional script to fix permissions on startup
-RUN cat >/fix-permissions.sh <<'EOF'
+# Create a dedicated fix script
+RUN cat >/fix-auth.sh <<'EOF'
 #!/bin/bash
-# Fix xrdp permissions for Windows 11 compatibility
-echo "Fixing xrdp permissions for Windows 11..."
+# Complete authorization fix for XRDP
+echo "Applying complete authorization fix..."
 
-# Allow root in xrdp
-sed -i 's/^#*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
-sed -i 's/^#*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
-sed -i 's/^#*disable_root_login=.*/disable_root_login=false/g' /etc/xrdp/xrdp.ini
-sed -i 's/^#*rdp_ssl=.*/rdp_ssl=yes/g' /etc/xrdp/xrdp.ini
-sed -i 's/^#*rdp_use_ssl=.*/rdp_use_ssl=yes/g' /etc/xrdp/xrdp.ini
+# Fix sesman.ini
+cat > /etc/xrdp/sesman.ini <<'INNEREOF'
+[Globals]
+ListenAddress=127.0.0.1
+ListenPort=3350
+EnableUserWindowManager=true
+UserWindowManager=startwm.sh
+DefaultWindowManager=startwm.sh
+AllowRootLogin=true
+AllowConsoleLogin=true
+RootLoginAllowed=true
+DisableAuthentication=true
+EnableRemoteLogin=true
+SessionTimeout=0
+DisconnectedTimeLimit=0
+IdleTimeLimit=0
+KillDisconnected=false
+XDisplay=10
+DisplayOffset=10
+MaxDisplayNumber=50
+UseXOrg=1
+X11rdpPath=/usr/lib/xorg/Xorg
 
-# Allow root in sesman
-sed -i 's/^#*AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini
-sed -i 's/^#*RootLoginAllowed=.*/RootLoginAllowed=true/g' /etc/xrdp/sesman.ini
-sed -i 's/^#*EnableRemoteLogin=.*/EnableRemoteLogin=true/g' /etc/xrdp/sesman.ini
+[X11rdp]
+param=Xorg
+param=-config
+param=xrdp/xorg.conf
+param=-noreset
+param=-nolisten
+param=tcp
+param=-logfile
+param=.xorgxrdp.%s.log
+
+[Chansrv]
+FuseMountName=thinclient_drives
+
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=50
+KillDisconnected=false
+IdleTimeLimit=0
+DisconnectedTimeLimit=0
+INNEREOF
+
+# Fix xrdp.ini
+sed -i 's/^.*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
+sed -i 's/^.*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
+sed -i 's/^.*disable_root_login=.*/disable_root_login=false/g' /etc/xrdp/xrdp.ini
+sed -i 's/^.*enable_token_login=.*/enable_token_login=false/g' /etc/xrdp/xrdp.ini
 
 # Set proper permissions
-chmod 755 /etc/xrdp/*.ini
+chmod 644 /etc/xrdp/sesman.ini
+chmod 644 /etc/xrdp/xrdp.ini
 chmod 755 /etc/xrdp/startwm.sh
 chmod 600 /root/.Xauthority
-chmod 600 /etc/xrdp/xrdp-key.pem
-chmod 644 /etc/xrdp/xrdp-cert.pem
 
-echo "Permissions fixed successfully!"
-echo "SSL certificate generated for Windows 11"
+echo "✓ Authorization fix complete!"
+echo ""
+echo "Configuration:"
+grep -E "AllowRootLogin|RootLoginAllowed|DisableAuthentication" /etc/xrdp/sesman.ini
+grep -E "allow_root|allow_console" /etc/xrdp/xrdp.ini
 EOF
 
-RUN chmod +x /fix-permissions.sh
+RUN chmod +x /fix-auth.sh
 
 EXPOSE 3389
 
-# Run fix-permissions before starting
-CMD ["/bin/bash", "-c", "/fix-permissions.sh && /start.sh"]
+# Run fix-auth before starting
+CMD ["/bin/bash", "-c", "/fix-auth.sh && /start.sh"]
