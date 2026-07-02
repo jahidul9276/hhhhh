@@ -22,19 +22,11 @@ services:
       - LC_ALL=en_US.UTF-8
       - DISPLAY_WIDTH=1920
       - DISPLAY_HEIGHT=1080
-      # CRITICAL: Allow root login
       - ALLOW_ROOT_LOGIN=true
       - DISABLE_AUTHENTICATION=true
-      - RDP_SSL=yes
-      - USE_TLS=true
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - xrdp-data:/var/lib/xrdp
       - xrdp-logs:/var/log
-      - /dev:/dev:rw
-      - /proc:/proc:rw
-      - /sys:/sys:rw
-      - /run/user/0:/run/user/0:rw
     cap_add:
       - ALL
     security_opt:
@@ -44,36 +36,12 @@ services:
       - /run:exec,suid,dev,size=512M
       - /tmp:exec,suid,dev,size=512M
       - /dev/shm:exec,suid,dev,size=512M
-    devices:
-      - /dev/null
-      - /dev/zero
-      - /dev/random
-      - /dev/urandom
-      - /dev/tty
-      - /dev/pts
-    sysctls:
-      - net.ipv6.conf.all.disable_ipv6=0
-      - net.ipv4.ip_forward=1
-      - fs.mqueue.msg_max=100
     healthcheck:
       test: ["CMD", "pgrep", "xrdp"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 2G
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
 volumes:
   xrdp-data:
