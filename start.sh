@@ -1,57 +1,90 @@
 #!/bin/bash
-set -e
 
 echo "========================================="
-echo "Starting XRDP Container Services"
+echo "XRDP Container Debug Tool"
 echo "========================================="
 
-# Create directories
-mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
-mkdir -p /root/.config/pulse /tmp/.X11-unix /run/user/0
-chmod 1777 /tmp/.X11-unix
-chmod 700 /run/user/0
+CONTAINER_NAME="xrdp"
 
-# Clean up
-rm -f /run/dbus/pid /var/run/dbus/pid /tmp/.X0-lock
-rm -f /var/run/xrdp/xrdp.pid /var/run/xrdp-sesman/xrdp-sesman.pid /run/pulse/pid
-rm -f /tmp/.X11-unix/X0 /tmp/.X11-unix/X10
-
-# Kill processes
-pkill -x dbus-daemon 2>/dev/null || true
-pkill -x pulseaudio 2>/dev/null || true
-pkill -x xrdp-sesman 2>/dev/null || true
-pkill -x xrdp 2>/dev/null || true
-pkill -x Xorg 2>/dev/null || true
-sleep 3
-
-# Start dbus
-dbus-daemon --system --fork
-sleep 2
-
-# Start pulseaudio
-pulseaudio --start --daemonize --exit-idle-time=-1 2>/dev/null || true
-sleep 2
-
-# Start xrdp-sesman
-/usr/sbin/xrdp-sesman --nodaemon &
-sleep 5
-
-# Start xrdp
-/usr/sbin/xrdp --nodaemon &
-sleep 3
-
-echo "========================================="
-echo "✓ XRDP Server is ready!"
-echo "  Connect to: localhost:3389"
-echo "  Username: root"
-echo "  Password: ja908070"
-echo "========================================="
-
-# Start Hermes if available
-if command -v hermes &> /dev/null; then
-    echo "Starting Hermes gateway..."
-    hermes gateway run &
+# Check if container is running
+if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo "❌ Container ${CONTAINER_NAME} is not running"
+    echo "Starting container..."
+    docker-compose up -d
+    sleep 5
 fi
 
-# Keep container running
-wait
+echo ""
+echo "1. Container Status:"
+docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+echo ""
+echo "2. Running Processes:"
+docker exec ${CONTAINER_NAME} ps aux | grep -E "xrdp|Xorg|xfce|dbus|pulse|bash"
+
+echo ""
+echo "3. Mount Points:"
+docker exec ${CONTAINER_NAME} mount | grep -E "proc|sys|dev|tmpfs"
+
+echo ""
+echo "4. Namespace Information:"
+docker exec ${CONTAINER_NAME} ls -la /proc/self/ns/
+
+echo ""
+echo "5. XRDP Logs:"
+docker exec ${CONTAINER_NAME} tail -30 /var/log/xrdp.log 2>/dev/null || echo "No xrdp.log found"
+
+echo ""
+echo "6. Sesman Logs:"
+docker exec ${CONTAINER_NAME} tail -30 /var/log/xrdp-sesman.log 2>/dev/null || echo "No sesman.log found"
+
+echo ""
+echo "7. Xorg Logs:"
+docker exec ${CONTAINER_NAME} ls -la /var/log/ | grep Xorg
+docker exec ${CONTAINER_NAME} tail -20 /var/log/Xorg.*.log 2>/dev/null || echo "No Xorg logs found"
+
+echo ""
+echo "8. Display Sockets:"
+docker exec ${CONTAINER_NAME} ls -la /tmp/.X11-unix/
+
+echo ""
+echo "9. Xauthority:"
+docker exec ${CONTAINER_NAME} ls -la /root/.Xauthority
+
+echo ""
+echo "10. Runtime Directory:"
+docker exec ${CONTAINER_NAME} ls -la /run/user/0/
+
+echo ""
+echo "11. PulseAudio Status:"
+docker exec ${CONTAINER_NAME} ps aux | grep pulseaudio
+docker exec ${CONTAINER_NAME} ls -la /run/pulse/
+
+echo ""
+echo "12. DBus Status:"
+docker exec ${CONTAINER_NAME} ps aux | grep dbus
+docker exec ${CONTAINER_NAME} ls -la /run/dbus/
+
+echo ""
+echo "13. Network Ports:"
+docker exec ${CONTAINER_NAME} netstat -tulpn | grep 3389
+
+echo ""
+echo "14. System Resources:"
+docker exec ${CONTAINER_NAME} free -h
+docker exec ${CONTAINER_NAME} df -h
+docker exec ${CONTAINER_NAME} nproc
+
+echo ""
+echo "15. Test RDP Connection:"
+nc -zv localhost 3389 2>&1 || echo "❌ Port 3389 not accessible"
+
+echo ""
+echo "========================================="
+echo "Debug Complete"
+echo "========================================="
+echo ""
+echo "To fix common issues:"
+echo "  docker restart ${CONTAINER_NAME}"
+echo "  docker logs -f ${CONTAINER_NAME}"
+echo "  docker exec ${CONTAINER_NAME} tail -f /var/log/xrdp.log"
