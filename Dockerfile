@@ -69,7 +69,7 @@ RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 # Set default session
 RUN echo "xfce4-session" > /root/.xsession
 
-# CRITICAL FIX: Complete xrdp configuration with proper authorization
+# CRITICAL: Create COMPLETE xrdp configuration
 RUN cat >/etc/xrdp/xrdp.ini <<'EOF'
 [Globals]
 ini_version=1
@@ -83,12 +83,11 @@ crypt_level=high
 max_bpp=32
 xserverbpp=32
 codecs=
-; CRITICAL: Allow root login
 allow_root=true
 allow_console=true
 enable_token_login=false
 disable_root_login=false
-; Windows 11 compatibility settings
+; Windows 11 compatibility
 rdp_ssl=yes
 ssl_cert_file=/etc/xrdp/xrdp-cert.pem
 ssl_key_file=/etc/xrdp/xrdp-key.pem
@@ -149,7 +148,7 @@ RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/xrdp/xrdp-key.pem -ou
     chmod 600 /etc/xrdp/xrdp-key.pem && \
     chmod 644 /etc/xrdp/xrdp-cert.pem
 
-# CRITICAL FIX: Complete sesman configuration with ALLOW root
+# CRITICAL: Create COMPLETE sesman configuration with ALL possible root options
 RUN cat >/etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -157,13 +156,15 @@ ListenPort=3350
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
-; CRITICAL: These are the key settings for root login
+; ALL possible root login options
 AllowRootLogin=true
 AllowConsoleLogin=true
 RootLoginAllowed=true
-; Disable authentication for root
 DisableAuthentication=true
 EnableRemoteLogin=true
+; Disable all authorization checks
+AlwaysGroupCheck=false
+FuseMountName=thinclient_drives
 ; Session settings
 SessionTimeout=0
 DisconnectedTimeLimit=0
@@ -241,10 +242,10 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# CRITICAL FIX: Create startwm.sh with proper environment
+# CRITICAL: Create startwm.sh
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
-# XRDP startwm.sh - Complete fix for root authorization
+# XRDP startwm.sh
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 export XDG_CURRENT_DESKTOP=XFCE
@@ -318,7 +319,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# CRITICAL FIX: Create start script with complete authorization fix
+# CRITICAL: Create start script with forced authorization bypass
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -328,26 +329,136 @@ echo "Starting XRDP Container Services"
 echo "Container ID: $(hostname)"
 echo "========================================="
 
-# CRITICAL: Fix authorization before starting
-echo "Fixing root authorization..."
+# ============================================
+# COMPLETE AUTHORIZATION BYPASS
+# ============================================
+echo "=== FORCE AUTHORIZATION BYPASS ==="
 
-# Ensure sesman allows root login
-sed -i 's/^.*AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini
-sed -i 's/^.*RootLoginAllowed=.*/RootLoginAllowed=true/g' /etc/xrdp/sesman.ini
-sed -i 's/^.*AllowConsoleLogin=.*/AllowConsoleLogin=true/g' /etc/xrdp/sesman.ini
-sed -i 's/^.*DisableAuthentication=.*/DisableAuthentication=true/g' /etc/xrdp/sesman.ini
+# Force sesman settings
+cat > /etc/xrdp/sesman.ini <<'SESMANEOF'
+[Globals]
+ListenAddress=127.0.0.1
+ListenPort=3350
+EnableUserWindowManager=true
+UserWindowManager=startwm.sh
+DefaultWindowManager=startwm.sh
+AllowRootLogin=true
+AllowConsoleLogin=true
+RootLoginAllowed=true
+DisableAuthentication=true
+EnableRemoteLogin=true
+AlwaysGroupCheck=false
+FuseMountName=thinclient_drives
+SessionTimeout=0
+DisconnectedTimeLimit=0
+IdleTimeLimit=0
+KillDisconnected=false
+XDisplay=10
+DisplayOffset=10
+MaxDisplayNumber=50
+UseXOrg=1
+X11rdpPath=/usr/lib/xorg/Xorg
 
-# Ensure xrdp allows root
-sed -i 's/^.*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
-sed -i 's/^.*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
-sed -i 's/^.*disable_root_login=.*/disable_root_login=false/g' /etc/xrdp/xrdp.ini
+[X11rdp]
+param=Xorg
+param=-config
+param=xrdp/xorg.conf
+param=-noreset
+param=-nolisten
+param=tcp
+param=-logfile
+param=.xorgxrdp.%s.log
 
-echo "✓ Authorization configured for root"
+[Chansrv]
+FuseMountName=thinclient_drives
+
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=50
+KillDisconnected=false
+IdleTimeLimit=0
+DisconnectedTimeLimit=0
+SESMANEOF
+
+# Force xrdp settings
+cat > /etc/xrdp/xrdp.ini <<'XRDPEOF'
+[Globals]
+ini_version=1
+fork=true
+port=3389
+use_vsock=false
+tcp_nodelay=true
+tcp_keepalive=true
+security_layer=negotiate
+crypt_level=high
+max_bpp=32
+xserverbpp=32
+codecs=
+allow_root=true
+allow_console=true
+enable_token_login=false
+disable_root_login=false
+rdp_ssl=yes
+ssl_cert_file=/etc/xrdp/xrdp-cert.pem
+ssl_key_file=/etc/xrdp/xrdp-key.pem
+ssl_verify=no
+rdp_use_ssl=yes
+crypto_use_fips=false
+tcp_send_buffer_bytes=262144
+tcp_recv_buffer_bytes=262144
+max_connections=100
+rdp_enhanced_security=yes
+tls_min_version=1.2
+tls_max_version=1.3
+
+[Xorg]
+name=Xorg
+lib=libxup.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+xserverbpp=32
+codecs=
+security_layer=negotiate
+crypt_level=high
+max_bpp=32
+
+[X11rdp]
+name=X11rdp
+lib=libxup.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+xserverbpp=32
+codecs=
+security_layer=negotiate
+crypt_level=high
+max_bpp=32
+
+[Chansrv]
+name=Chansrv
+lib=libchansrv.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=50
+KillDisconnected=false
+IdleTimeLimit=0
+DisconnectedTimeLimit=0
+XRDPEOF
+
+echo "✓ Configuration files overwritten with root access"
 
 # Setup mount namespace and permissions
 echo "Setting up mount namespace permissions..."
 
-# Create all necessary directories with proper permissions
+# Create all necessary directories
 mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
 mkdir -p /root/.config/pulse /tmp/.X11-unix /run/user/0
 mkdir -p /tmp/thinclient_drives /var/lib/xrdp /var/log/xrdp
@@ -356,7 +467,7 @@ chmod 1777 /tmp/.X11-unix
 chmod 700 /run/user/0
 chmod 755 /var/run/xrdp /var/run/xrdp-sesman /tmp/thinclient_drives
 
-# Mount proc and sys if not already mounted
+# Mount proc and sys
 if ! mountpoint -q /proc; then
     mount -t proc proc /proc
 fi
@@ -373,12 +484,11 @@ if ! mountpoint -q /dev/shm; then
     mount -t tmpfs tmpfs /dev/shm
 fi
 
-# Setup /dev/tty
+# Setup /dev entries
 if [ ! -e /dev/tty ]; then
     mknod -m 666 /dev/tty c 5 0 2>/dev/null || true
 fi
 
-# Setup /dev/null and /dev/zero
 if [ ! -e /dev/null ]; then
     mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 fi
@@ -387,12 +497,11 @@ if [ ! -e /dev/zero ]; then
     mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
 fi
 
-# Setup /dev/pts
 if ! mountpoint -q /dev/pts; then
     mount -t devpts devpts /dev/pts
 fi
 
-# Create Xauthority if missing
+# Create Xauthority
 touch /root/.Xauthority && chmod 600 /root/.Xauthority
 
 # Clean up stale files
@@ -425,13 +534,13 @@ pulseaudio --start --daemonize --exit-idle-time=-1 --disable-shm=yes --realtime=
 sleep 2
 echo "✓ pulseaudio configured"
 
-# CRITICAL: Start xrdp-sesman with root authorization
-echo "[3/5] Starting xrdp-sesman with root authorization..."
-# Show sesman configuration
-echo "Sesman configuration:"
+# Start xrdp-sesman
+echo "[3/5] Starting xrdp-sesman..."
+echo "Verifying sesman configuration:"
+echo "----------------------------------------"
 grep -E "AllowRootLogin|RootLoginAllowed|DisableAuthentication" /etc/xrdp/sesman.ini
+echo "----------------------------------------"
 
-# Start sesman
 /usr/sbin/xrdp-sesman --nodaemon &
 SESMAN_PID=$!
 sleep 5
@@ -440,11 +549,8 @@ if ps -p $SESMAN_PID > /dev/null 2>&1; then
     echo "✓ xrdp-sesman started (PID: $SESMAN_PID)"
 else
     echo "✗ ERROR: xrdp-sesman failed to start"
-    echo "Checking sesman log..."
     if [ -f /var/log/xrdp-sesman.log ]; then
-        tail -20 /var/log/xrdp-sesman.log
-    else
-        echo "No sesman log found"
+        tail -30 /var/log/xrdp-sesman.log
     fi
     exit 1
 fi
@@ -452,14 +558,12 @@ fi
 # Start xrdp
 echo "[4/5] Starting xrdp on port 3389..."
 
-# Show system information
 echo ""
 echo "System Information:"
 echo "  Hostname: $(hostname)"
 echo "  Kernel: $(uname -r)"
 echo "  Architecture: $(uname -m)"
 echo "  Memory: $(free -h | grep Mem | awk '{print $2}')"
-echo "  Disk: $(df -h / | awk 'NR==2 {print $2}')"
 echo "  CPU: $(nproc) cores"
 echo ""
 
@@ -472,11 +576,11 @@ echo "  Password: ja908070"
 echo "  Session: Xorg (Display :10)"
 echo "========================================="
 echo ""
-echo "Authorization Status:"
-echo "  AllowRootLogin: $(grep AllowRootLogin /etc/xrdp/sesman.ini | tail -1)"
-echo "  RootLoginAllowed: $(grep RootLoginAllowed /etc/xrdp/sesman.ini | tail -1)"
-echo "  DisableAuthentication: $(grep DisableAuthentication /etc/xrdp/sesman.ini | tail -1)"
-echo "  allow_root: $(grep allow_root /etc/xrdp/xrdp.ini | tail -1)"
+echo "AUTHORIZATION STATUS:"
+echo "  AllowRootLogin: $(grep ^AllowRootLogin /etc/xrdp/sesman.ini | tail -1)"
+echo "  RootLoginAllowed: $(grep ^RootLoginAllowed /etc/xrdp/sesman.ini | tail -1)"
+echo "  DisableAuthentication: $(grep ^DisableAuthentication /etc/xrdp/sesman.ini | tail -1)"
+echo "  allow_root: $(grep ^allow_root /etc/xrdp/xrdp.ini | tail -1)"
 echo "========================================="
 echo ""
 echo "Session Information:"
@@ -490,7 +594,6 @@ echo ""
 echo "To monitor logs:"
 echo "  docker exec -it xrdp tail -f /var/log/xrdp.log"
 echo "  docker exec -it xrdp tail -f /var/log/xrdp-sesman.log"
-echo "  docker exec -it xrdp tail -f /var/log/Xorg.10.log"
 echo ""
 
 # Keep the container running with xrdp in foreground
@@ -499,78 +602,6 @@ EOF
 
 RUN chmod +x /start.sh
 
-# Create a dedicated fix script
-RUN cat >/fix-auth.sh <<'EOF'
-#!/bin/bash
-# Complete authorization fix for XRDP
-echo "Applying complete authorization fix..."
-
-# Fix sesman.ini
-cat > /etc/xrdp/sesman.ini <<'INNEREOF'
-[Globals]
-ListenAddress=127.0.0.1
-ListenPort=3350
-EnableUserWindowManager=true
-UserWindowManager=startwm.sh
-DefaultWindowManager=startwm.sh
-AllowRootLogin=true
-AllowConsoleLogin=true
-RootLoginAllowed=true
-DisableAuthentication=true
-EnableRemoteLogin=true
-SessionTimeout=0
-DisconnectedTimeLimit=0
-IdleTimeLimit=0
-KillDisconnected=false
-XDisplay=10
-DisplayOffset=10
-MaxDisplayNumber=50
-UseXOrg=1
-X11rdpPath=/usr/lib/xorg/Xorg
-
-[X11rdp]
-param=Xorg
-param=-config
-param=xrdp/xorg.conf
-param=-noreset
-param=-nolisten
-param=tcp
-param=-logfile
-param=.xorgxrdp.%s.log
-
-[Chansrv]
-FuseMountName=thinclient_drives
-
-[SessionVariables]
-X11DisplayOffset=10
-MaxDisplayNumber=50
-KillDisconnected=false
-IdleTimeLimit=0
-DisconnectedTimeLimit=0
-INNEREOF
-
-# Fix xrdp.ini
-sed -i 's/^.*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
-sed -i 's/^.*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
-sed -i 's/^.*disable_root_login=.*/disable_root_login=false/g' /etc/xrdp/xrdp.ini
-sed -i 's/^.*enable_token_login=.*/enable_token_login=false/g' /etc/xrdp/xrdp.ini
-
-# Set proper permissions
-chmod 644 /etc/xrdp/sesman.ini
-chmod 644 /etc/xrdp/xrdp.ini
-chmod 755 /etc/xrdp/startwm.sh
-chmod 600 /root/.Xauthority
-
-echo "✓ Authorization fix complete!"
-echo ""
-echo "Configuration:"
-grep -E "AllowRootLogin|RootLoginAllowed|DisableAuthentication" /etc/xrdp/sesman.ini
-grep -E "allow_root|allow_console" /etc/xrdp/xrdp.ini
-EOF
-
-RUN chmod +x /fix-auth.sh
-
 EXPOSE 3389
 
-# Run fix-auth before starting
-CMD ["/bin/bash", "-c", "/fix-auth.sh && /start.sh"]
+CMD ["/start.sh"]
