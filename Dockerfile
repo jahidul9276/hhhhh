@@ -39,8 +39,11 @@ xserver-xorg-video-dummy \
 # Set root password
 RUN echo "root:ja908070" | chpasswd
 
-# Create Xauthority file to fix xauth warning
+# Create Xauthority file
 RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
+
+# Fix XDG_RUNTIME_DIR permissions (FIXES THE WARNING)
+RUN chmod 700 /tmp
 
 # Configure X11
 RUN mkdir -p /etc/X11
@@ -71,7 +74,7 @@ RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
 
-# Create Xorg configuration for xrdp (fix GPU issues)
+# Create Xorg configuration
 RUN mkdir -p /etc/X11/xrdp
 RUN cat >/etc/X11/xrdp/xorg.conf <<'EOF'
 Section "Device"
@@ -106,10 +109,10 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# Remove light-locker to avoid warnings
+# Remove light-locker
 RUN apt-get remove -y light-locker || true
 
-# Disable unnecessary services from autostart
+# Disable unnecessary services
 RUN mkdir -p /root/.config/autostart
 RUN cat > /root/.config/autostart/light-locker.desktop <<'EOF'
 [Desktop Entry]
@@ -131,7 +134,17 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=false
 EOF
 
-# Create necessary directories
+RUN cat > /root/.config/autostart/xfce4-settings-helper.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Settings Helper
+Exec=/bin/true
+Hidden=true
+NoDisplay=true
+X-GNOME-Autostart-enabled=false
+EOF
+
+# Create directories
 RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp
 
 # Create pulse client config
@@ -147,7 +160,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# Create start script
+# Create start script with suppressed warnings
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -160,8 +173,9 @@ echo "========================================="
 mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
 mkdir -p /root/.config/pulse /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
+chmod 700 /tmp  # Fix XDG_RUNTIME_DIR warning
 
-# Create Xauthority if missing
+# Create Xauthority
 touch /root/.Xauthority && chmod 600 /root/.Xauthority
 
 # Clean up stale files
