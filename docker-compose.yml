@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  xrdp:
+    build: .
+    container_name: xrdp
+    privileged: true
+    ports:
+      - "3389:3389"
+    restart: unless-stopped
+    environment:
+      - DISPLAY=:0
+      - XDG_RUNTIME_DIR=/run/user/0
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    command: ["/start.sh"]
