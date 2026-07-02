@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture for 32-bit support
 RUN dpkg --add-architecture i386
 
-# Install all required packages - REMOVED policykit-1
+# Install all required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -109,9 +109,9 @@ use_vsock=false
 tcp_nodelay=true
 tcp_keepalive=true
 security_layer=negotiate
-crypt_level=high
-max_bpp=32
-xserverbpp=32
+crypt_level=low
+max_bpp=16
+xserverbpp=16
 codecs=
 allow_root=true
 allow_console=true
@@ -127,7 +127,7 @@ tcp_send_buffer_bytes=262144
 tcp_recv_buffer_bytes=262144
 max_connections=100
 rdp_enhanced_security=yes
-tls_min_version=1.2
+tls_min_version=1.0
 tls_max_version=1.3
 
 [Xorg]
@@ -137,11 +137,11 @@ username=root
 password=ja908070
 ip=127.0.0.1
 port=-1
-xserverbpp=32
+xserverbpp=16
 codecs=
 security_layer=negotiate
-crypt_level=high
-max_bpp=32
+crypt_level=low
+max_bpp=16
 
 [X11rdp]
 name=X11rdp
@@ -150,11 +150,11 @@ username=root
 password=ja908070
 ip=127.0.0.1
 port=-1
-xserverbpp=32
+xserverbpp=16
 codecs=
 security_layer=negotiate
-crypt_level=high
-max_bpp=32
+crypt_level=low
+max_bpp=16
 
 [Chansrv]
 name=Chansrv
@@ -237,7 +237,7 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 EOF
 
-# Create Xorg configuration
+# Create Xorg configuration with proper video settings
 RUN mkdir -p /etc/X11/xorg.conf.d
 RUN cat > /etc/X11/xorg.conf.d/99-dummy.conf <<'EOF'
 Section "Device"
@@ -248,7 +248,7 @@ Section "Device"
     Option      "IgnoreEDID" "true"
     Option      "UseDisplayDevice" "none"
     Option      "NoRandR" "false"
-    VideoRam    256000
+    Option      "VideoRam" "262144"
 EndSection
 
 Section "Monitor"
@@ -257,17 +257,17 @@ Section "Monitor"
     VertRefresh 43-60
     Option      "DPMS" "false"
     Option      "Enable" "true"
-    Option      "PreferredMode" "1920x1080"
+    Option      "PreferredMode" "1280x720"
 EndSection
 
 Section "Screen"
     Identifier  "DummyScreen"
     Device      "DummyDevice"
     Monitor     "DummyMonitor"
-    DefaultDepth 32
+    DefaultDepth 16
     SubSection "Display"
-        Depth 32
-        Modes "1920x1080" "1280x720" "1024x768" "800x600"
+        Depth 16
+        Modes "1280x720" "1024x768" "800x600"
     EndSubSection
 EndSection
 
@@ -281,7 +281,7 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# Create startwm.sh
+# Create startwm.sh with proper Xorg startup
 RUN cat > /etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
 # XRDP startwm.sh
@@ -314,8 +314,8 @@ if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
     export DBUS_SESSION_BUS_ADDRESS
 fi
 
-# Start XFCE
-exec startxfce4
+# Start XFCE with proper options
+exec startxfce4 --display=:10
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
