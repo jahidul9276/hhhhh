@@ -15,7 +15,7 @@ curl \
 wget \
 nano \
 net-tools \
-policykit-1 \
+polkitd \
 pulseaudio \
 pulseaudio-utils \
 firefox-esr \
