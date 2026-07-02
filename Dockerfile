@@ -1,11 +1,11 @@
-FROM debian:trixie
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Add i386 architecture
+# Add i386 architecture for Wine support
 RUN dpkg --add-architecture i386
 
-# Install required packages
+# Update and install all required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -19,7 +19,7 @@ nano \
 net-tools \
 pulseaudio \
 pulseaudio-utils \
-firefox-esr \
+firefox \
 python3 \
 python3-pip \
 build-essential \
@@ -30,9 +30,13 @@ libc6:i386 \
 procps \
 xauth \
 xorg \
-polkitd \
-pkexec \
+policykit-1 \
 iproute2 \
+software-properties-common \
+apt-utils \
+vim \
+htop \
+telnet \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
@@ -41,7 +45,7 @@ RUN useradd -m -s /bin/bash xrdpuser && \
     echo "xrdpuser:ja908070" | chpasswd && \
     usermod -aG sudo xrdpuser
 
-# Set root password
+# Set root password (for emergency)
 RUN echo "root:ja908070" | chpasswd
 
 # Create X11 configuration
@@ -51,6 +55,7 @@ RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 # Set default X session for user
 RUN mkdir -p /home/xrdpuser/.config/xfce4 && \
     echo "xfce4-session" > /home/xrdpuser/.xsession && \
+    echo "startxfce4" > /home/xrdpuser/.xsessionrc && \
     chown -R xrdpuser:xrdpuser /home/xrdpuser
 
 # Create xrdp startup script
@@ -62,12 +67,15 @@ export DISPLAY=:0
 export XDG_RUNTIME_DIR=/run/user/1000
 export HOME=/home/xrdpuser
 export SHELL=/bin/bash
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
 exec startxfce4
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Create complete xrdp configuration
+# Configure xrdp
 RUN cat > /etc/xrdp/xrdp.ini <<'EOF'
 [Globals]
 ini_version=1
@@ -124,7 +132,7 @@ port=-1
 code=3
 EOF
 
-# Create sesman configuration
+# Configure sesman
 RUN cat > /etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -186,19 +194,28 @@ Policy=Default
 EOF
 
 # Create necessary directories
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/1000
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/1000 /var/log/xrdp
 RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus
-RUN chmod 755 /run/user/1000
+RUN chmod 755 /run/user/1000 /var/log/xrdp
 
 # Create .Xauthority for user
 RUN touch /home/xrdpuser/.Xauthority && \
     chown xrdpuser:xrdpuser /home/xrdpuser/.Xauthority && \
     chmod 600 /home/xrdpuser/.Xauthority
 
-# Copy start script
+# Create .Xauthority for root
+RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
+
+# Copy configuration files
+COPY pulse-client.conf /etc/pulse/client.conf
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
+# Set working directory
+WORKDIR /home/xrdpuser
+
+# Expose RDP port
 EXPOSE 3389
 
+# Start script
 CMD ["/start.sh"]
