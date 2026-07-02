@@ -7,49 +7,31 @@ echo "Container ID: $(hostname)"
 echo "========================================="
 
 # ============================================
-# CRITICAL: COMPLETE AUTHORIZATION BYPASS
+# THE REAL AUTHENTICATION BYPASS
 # ============================================
-echo "=== COMPLETE AUTHORIZATION BYPASS ==="
 
-# Ensure directories exist
-mkdir -p /etc/xrdp
-mkdir -p /etc/polkit-1/localauthority/50-local.d/
-mkdir -p /etc/pam.d
+# 1. Backup original files
+cp /etc/xrdp/sesman.ini /etc/xrdp/sesman.ini.bak 2>/dev/null || true
+cp /etc/pam.d/xrdp-sesman /etc/pam.d/xrdp-sesman.bak 2>/dev/null || true
 
-# Remove ALL security policies
-rm -f /etc/polkit-1/localauthority/50-local.d/*.pkla 2>/dev/null || true
-rm -f /etc/polkit-1/localauthority/10-vendor.d/*.pkla 2>/dev/null || true
-
-# Create new policy allowing everything
-cat > /etc/polkit-1/localauthority/50-local.d/99-xrdp.pkla <<'POLKITEOF'
-[Allow xrdp]
-Identity=unix-user:*
-Action=*
-ResultAny=yes
-ResultInactive=yes
-ResultActive=yes
-POLKITEOF
-
-# CRITICAL: Set up PAM to allow ALL users without authentication
+# 2. FIX PAM - use pam_permit.so (this is the KEY)
 cat > /etc/pam.d/xrdp-sesman <<'PAMEOF'
 #%PAM-1.0
-auth        required      pam_permit.so
+auth        sufficient    pam_permit.so
 auth        required      pam_env.so
-account     required      pam_permit.so
-session     required      pam_permit.so
-session     optional      pam_motd.so
-session     optional      pam_mail.so
+account     sufficient    pam_permit.so
+session     sufficient    pam_permit.so
 PAMEOF
 
 cat > /etc/pam.d/xrdp <<'PAMEOF'
 #%PAM-1.0
-auth        required      pam_permit.so
+auth        sufficient    pam_permit.so
 auth        required      pam_env.so
-account     required      pam_permit.so
-session     required      pam_permit.so
+account     sufficient    pam_permit.so
+session     sufficient    pam_permit.so
 PAMEOF
 
-# FORCE sesman settings with DisableAuthentication=true and all auth bypass
+# 3. Create sesman.ini with ALL settings
 cat > /etc/xrdp/sesman.ini <<'SESMANEOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -95,7 +77,7 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 SESMANEOF
 
-# FORCE xrdp settings with root access
+# 4. Create xrdp.ini
 cat > /etc/xrdp/xrdp.ini <<'XRDPEOF'
 [Globals]
 ini_version=1
@@ -168,27 +150,14 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 XRDPEOF
 
-# CRITICAL: Also modify /etc/xrdp/xrdp.ini to add root user explicitly
-echo "" >> /etc/xrdp/xrdp.ini
-echo "[root]" >> /etc/xrdp/xrdp.ini
-echo "name=root" >> /etc/xrdp/xrdp.ini
-echo "lib=libxup.so" >> /etc/xrdp/xrdp.ini
-echo "username=root" >> /etc/xrdp/xrdp.ini
-echo "password=ja908070" >> /etc/xrdp/xrdp.ini
-echo "ip=127.0.0.1" >> /etc/xrdp/xrdp.ini
-echo "port=-1" >> /etc/xrdp/xrdp.ini
-echo "xserverbpp=16" >> /etc/xrdp/xrdp.ini
-echo "codecs=" >> /etc/xrdp/xrdp.ini
+echo "✓ Configuration files updated"
 
-echo "✓ All configurations bypassed"
-
-# Setup directories with proper permissions
-echo "Setting up directories..."
+# Setup directories
 mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
-mkdir -p /home/xrdpuser/.config/pulse /tmp/.X11-unix /run/user/1000 /run/user/0
+mkdir -p /home/xrdpuser/.config/pulse /tmp/.X11-unix /run/user/1000
 mkdir -p /tmp/thinclient_drives /var/lib/xrdp /var/log/xrdp
 chmod 1777 /tmp/.X11-unix
-chmod 700 /run/user/1000 /run/user/0 2>/dev/null || true
+chmod 700 /run/user/1000
 chmod 755 /var/run/xrdp /var/run/xrdp-sesman /tmp/thinclient_drives
 
 # Create Xauthority files
@@ -209,8 +178,6 @@ pkill -x pulseaudio 2>/dev/null || true
 pkill -x xrdp-sesman 2>/dev/null || true
 pkill -x xrdp 2>/dev/null || true
 pkill -x Xorg 2>/dev/null || true
-pkill -x startxfce4 2>/dev/null || true
-pkill -x xfce4-session 2>/dev/null || true
 sleep 3
 
 # Start dbus
@@ -225,14 +192,17 @@ export PULSE_RUNTIME_PATH=/run/pulse
 pulseaudio --start --daemonize --exit-idle-time=-1 --disable-shm=yes --realtime=no 2>/dev/null || echo "⚠ Pulseaudio not available"
 sleep 2
 
-# Start xrdp-sesman with debug
+# Start xrdp-sesman
 echo "[3/5] Starting xrdp-sesman..."
-echo "Verifying sesman configuration:"
-echo "----------------------------------------"
+echo "========================================="
+echo "SESMAN CONFIGURATION:"
 grep -E "AllowRootLogin|RootLoginAllowed|DisableAuthentication" /etc/xrdp/sesman.ini
-echo "----------------------------------------"
+echo "========================================="
+echo "PAM CONFIGURATION:"
+head -5 /etc/pam.d/xrdp-sesman
+echo "========================================="
 
-# Start sesman with nodaemon
+# Start sesman
 /usr/sbin/xrdp-sesman --nodaemon &
 SESMAN_PID=$!
 sleep 5
@@ -251,45 +221,13 @@ fi
 echo "[4/5] Starting xrdp on port 3389..."
 
 echo ""
-echo "System Information:"
-echo "  Hostname: $(hostname)"
-echo "  Kernel: $(uname -r)"
-echo "  Architecture: $(uname -m)"
-echo "  Memory: $(free -h | grep Mem | awk '{print $2}')"
-echo "  CPU: $(nproc) cores"
-echo ""
-
-echo "[5/5] XRDP Server ready!"
 echo "========================================="
 echo "✓ XRDP Server is ready!"
 echo "  Connect to: localhost:3389"
 echo ""
-echo "  LOGIN CREDENTIALS:"
 echo "  Username: root"
 echo "  Password: ja908070"
-echo ""
-echo "  OR use non-root user:"
-echo "  Username: xrdpuser"
-echo "  Password: ja908070"
 echo "========================================="
-echo ""
-echo "AUTHORIZATION STATUS:"
-echo "  AllowRootLogin: $(grep ^AllowRootLogin /etc/xrdp/sesman.ini | tail -1)"
-echo "  RootLoginAllowed: $(grep ^RootLoginAllowed /etc/xrdp/sesman.ini | tail -1)"
-echo "  DisableAuthentication: $(grep ^DisableAuthentication /etc/xrdp/sesman.ini | tail -1)"
-echo "  allow_root: $(grep ^allow_root /etc/xrdp/xrdp.ini | tail -1)"
-echo "  PAM: $(head -1 /etc/pam.d/xrdp-sesman)"
-echo "========================================="
-echo ""
-echo "Session Information:"
-echo "  Display: :10"
-echo "  Xauthority: /home/xrdpuser/.Xauthority"
-echo "  Runtime dir: /run/user/1000"
-echo "  Pulse socket: /run/pulse/native"
-echo "  DBus socket: /run/dbus/system_bus_socket"
-echo "  SSL Certificate: /etc/xrdp/xrdp-cert.pem"
-echo "  Color Depth: 16-bit"
-echo "  Resolution: 1280x720"
 echo ""
 echo "To monitor logs:"
 echo "  docker exec -it xrdp tail -f /var/log/xrdp.log"
