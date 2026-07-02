@@ -31,6 +31,8 @@ procps \
 iproute2 \
 x11-utils \
 xauth \
+pm-utils \
+lightdm \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
@@ -53,6 +55,9 @@ export XDG_CURRENT_DESKTOP=XFCE
 export XDG_MENU_PREFIX=xfce-
 export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
 export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
+# Disable services that cause warnings in containers
+export DISABLE_WAYLAND=1
+export XDG_RUNTIME_DIR=/tmp
 exec startxfce4
 EOF
 
@@ -63,8 +68,9 @@ RUN sed -i 's/^#.*port=3389/port=3389/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*tcp_send_buffer_bytes=.*/tcp_send_buffer_bytes=32768/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*tcp_recv_buffer_bytes=.*/tcp_recv_buffer_bytes=32768/g' /etc/xrdp/xrdp.ini
+
+# Disable light-locker to avoid /proc warnings
+RUN apt-get remove -y light-locker || true
 
 # Create necessary directories
 RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp
@@ -82,7 +88,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# Create start script with mount/namespace support
+# Create start script with fixes for container warnings
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -91,7 +97,7 @@ echo "========================================="
 echo "Starting XRDP Container Services"
 echo "========================================="
 
-# Create runtime directories with proper permissions
+# Create runtime directories
 mkdir -p /run/dbus
 mkdir -p /var/run/dbus
 mkdir -p /run/pulse
@@ -100,8 +106,6 @@ mkdir -p /var/run/xrdp-sesman
 mkdir -p /root/.config/pulse
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
-chmod 755 /run/dbus
-chmod 755 /var/run/dbus
 
 # Clean up stale PID files
 echo "Cleaning up stale PID files..."
@@ -132,15 +136,19 @@ else
     exit 1
 fi
 
-# Start pulseaudio
+# Start pulseaudio with proper configuration for containers
 echo "[2/4] Starting pulseaudio..."
 if ! pgrep -x "pulseaudio" > /dev/null; then
-    pulseaudio --start --daemonize 2>/dev/null || echo "⚠ Pulseaudio start failed, continuing..."
+    # Fix for pulseaudio in containers
+    export PULSE_RUNTIME_PATH=/run/pulse
+    pulseaudio --start --daemonize --exit-idle-time=-1 2>/dev/null || echo "⚠ Pulseaudio start failed, continuing..."
     sleep 1
     if pgrep -x "pulseaudio" > /dev/null; then
         echo "✓ pulseaudio started (PID: $(pgrep -x pulseaudio))"
     else
         echo "⚠ pulseaudio not running (continuing anyway)"
+        # Create a dummy pulse socket to avoid connection refused
+        touch /run/pulse/native
     fi
 else
     echo "✓ pulseaudio already running"
