@@ -69,6 +69,10 @@ RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 # Set default session
 RUN echo "xfce4-session" > /root/.xsession
 
+# CRITICAL FIX: Allow root login in xrdp
+RUN sed -i 's/^#*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^#*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
+
 # Create Xorg configuration - FIXED for dummy display
 RUN mkdir -p /etc/X11/xorg.conf.d
 RUN cat >/etc/X11/xorg.conf.d/99-dummy.conf <<'EOF'
@@ -111,52 +115,73 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# Create xrdp startup script - FIXED with proper session handling
-RUN cat >/etc/xrdp/startwm.sh <<'EOF'
-#!/bin/sh
-# XRDP startwm.sh for XFCE with proper namespace support
-unset DBUS_SESSION_BUS_ADDRESS
-unset XDG_RUNTIME_DIR
-export XDG_CURRENT_DESKTOP=XFCE
-export XDG_MENU_PREFIX=xfce-
-export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
-export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share:/usr/local/share
-export DISABLE_WAYLAND=1
-export XDG_RUNTIME_DIR=/run/user/0
-export XAUTHORITY=/root/.Xauthority
-export HOME=/root
-export USER=root
-export SHELL=/bin/bash
+# CRITICAL FIX: Create proper xrdp configuration with root access
+RUN cat >/etc/xrdp/xrdp.ini <<'EOF'
+[Globals]
+ini_version=1
+fork=true
+port=3389
+use_vsock=false
+tcp_nodelay=true
+tcp_keepalive=true
+security_layer=negotiate
+crypt_level=high
+max_bpp=24
+xserverbpp=24
+codecs=
+allow_root=true
+allow_console=true
+enable_token_login=false
+# Disable root login restrictions
+disable_root_login=false
+;allow_root=true
+;allow_console=true
 
-# Create runtime directory
-mkdir -p /run/user/0
-chmod 700 /run/user/0
+[Xorg]
+name=Xorg
+lib=libxup.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+xserverbpp=24
+codecs=
+; Disable root login checks
+security_layer=negotiate
+crypt_level=high
+max_bpp=24
 
-# Clean up display locks
-rm -f /tmp/.X0-lock /tmp/.X10-lock /tmp/.X11-unix/X0 /tmp/.X11-unix/X10
+[X11rdp]
+name=X11rdp
+lib=libxup.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+xserverbpp=24
+codecs=
+; Disable root login checks
+security_layer=negotiate
+crypt_level=high
+max_bpp=24
 
-# Start DBus session
-if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
-    eval `dbus-launch --sh-syntax --exit-with-session`
-    export DBUS_SESSION_BUS_ADDRESS
-fi
+[Chansrv]
+name=Chansrv
+lib=libchansrv.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
 
-# Start XFCE
-exec startxfce4
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=50
+KillDisconnected=false
+IdleTimeLimit=0
+DisconnectedTimeLimit=0
 EOF
 
-RUN chmod +x /etc/xrdp/startwm.sh
-
-# Configure xrdp
-RUN sed -i 's/^port=3389/port=3389/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#max_bpp=.*/max_bpp=24/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#tcp_send_buffer_bytes=.*/tcp_send_buffer_bytes=262144/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#tcp_recv_buffer_bytes=.*/tcp_recv_buffer_bytes=262144/g' /etc/xrdp/xrdp.ini
-
-# Configure sesman - COMPLETE FIX
+# CRITICAL FIX: Configure sesman to allow root
 RUN cat >/etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -165,6 +190,17 @@ EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
 SessionVariables=XDG_CURRENT_DESKTOP=XFCE,XDG_MENU_PREFIX=xfce-,XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg,XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
+; Allow root login
+AllowRootLogin=true
+AllowConsoleLogin=true
+RootLoginAllowed=true
+; Disable authentication for local connections
+DisableAuthentication=true
+; Session timeout settings
+SessionTimeout=0
+DisconnectedTimeLimit=0
+IdleTimeLimit=0
+KillDisconnected=false
 
 [X11rdp]
 param=Xorg
@@ -186,6 +222,43 @@ KillDisconnected=false
 IdleTimeLimit=0
 DisconnectedTimeLimit=0
 EOF
+
+# Create xrdp startup script - FIXED with proper session handling
+RUN cat >/etc/xrdp/startwm.sh <<'EOF'
+#!/bin/sh
+# XRDP startwm.sh for XFCE with root access
+unset DBUS_SESSION_BUS_ADDRESS
+unset XDG_RUNTIME_DIR
+export XDG_CURRENT_DESKTOP=XFCE
+export XDG_MENU_PREFIX=xfce-
+export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
+export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share:/usr/local/share
+export DISABLE_WAYLAND=1
+export XDG_RUNTIME_DIR=/run/user/0
+export XAUTHORITY=/root/.Xauthority
+export HOME=/root
+export USER=root
+export SHELL=/bin/bash
+export DISPLAY=:10
+
+# Create runtime directory
+mkdir -p /run/user/0
+chmod 700 /run/user/0
+
+# Clean up display locks
+rm -f /tmp/.X0-lock /tmp/.X10-lock /tmp/.X11-unix/X0 /tmp/.X11-unix/X10
+
+# Start DBus session
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    eval `dbus-launch --sh-syntax --exit-with-session`
+    export DBUS_SESSION_BUS_ADDRESS
+fi
+
+# Start XFCE
+exec startxfce4
+EOF
+
+RUN chmod +x /etc/xrdp/startwm.sh
 
 # Remove light-locker and power manager
 RUN apt-get remove -y light-locker xfce4-power-manager || true
@@ -388,6 +461,33 @@ EOF
 
 RUN chmod +x /start.sh
 
+# Create additional script to fix permissions on startup
+RUN cat >/fix-permissions.sh <<'EOF'
+#!/bin/bash
+# Fix xrdp permissions for root access
+echo "Fixing xrdp permissions..."
+
+# Allow root in xrdp
+sed -i 's/^#*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
+sed -i 's/^#*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
+sed -i 's/^#*disable_root_login=.*/disable_root_login=false/g' /etc/xrdp/xrdp.ini
+
+# Allow root in sesman
+sed -i 's/^#*AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini
+sed -i 's/^#*RootLoginAllowed=.*/RootLoginAllowed=true/g' /etc/xrdp/sesman.ini
+sed -i 's/^#*DisableAuthentication=.*/DisableAuthentication=true/g' /etc/xrdp/sesman.ini
+
+# Set proper permissions
+chmod 755 /etc/xrdp/*.ini
+chmod 755 /etc/xrdp/startwm.sh
+chmod 600 /root/.Xauthority
+
+echo "Permissions fixed successfully!"
+EOF
+
+RUN chmod +x /fix-permissions.sh
+
 EXPOSE 3389
 
-CMD ["/start.sh"]
+# Run fix-permissions before starting
+CMD ["/bin/bash", "-c", "/fix-permissions.sh && /start.sh"]
