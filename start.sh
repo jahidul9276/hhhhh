@@ -95,7 +95,7 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 SESMANEOF
 
-# Force xrdp settings with root access
+# Force xrdp settings with root access and lower encryption
 cat > /etc/xrdp/xrdp.ini <<'XRDPEOF'
 [Globals]
 ini_version=1
@@ -105,9 +105,9 @@ use_vsock=false
 tcp_nodelay=true
 tcp_keepalive=true
 security_layer=negotiate
-crypt_level=high
-max_bpp=32
-xserverbpp=32
+crypt_level=low
+max_bpp=16
+xserverbpp=16
 codecs=
 allow_root=true
 allow_console=true
@@ -123,7 +123,7 @@ tcp_send_buffer_bytes=262144
 tcp_recv_buffer_bytes=262144
 max_connections=100
 rdp_enhanced_security=yes
-tls_min_version=1.2
+tls_min_version=1.0
 tls_max_version=1.3
 
 [Xorg]
@@ -133,11 +133,11 @@ username=root
 password=ja908070
 ip=127.0.0.1
 port=-1
-xserverbpp=32
+xserverbpp=16
 codecs=
 security_layer=negotiate
-crypt_level=high
-max_bpp=32
+crypt_level=low
+max_bpp=16
 
 [X11rdp]
 name=X11rdp
@@ -146,11 +146,11 @@ username=root
 password=ja908070
 ip=127.0.0.1
 port=-1
-xserverbpp=32
+xserverbpp=16
 codecs=
 security_layer=negotiate
-crypt_level=high
-max_bpp=32
+crypt_level=low
+max_bpp=16
 
 [Chansrv]
 name=Chansrv
@@ -197,6 +197,8 @@ pkill -x pulseaudio 2>/dev/null || true
 pkill -x xrdp-sesman 2>/dev/null || true
 pkill -x xrdp 2>/dev/null || true
 pkill -x Xorg 2>/dev/null || true
+pkill -x startxfce4 2>/dev/null || true
+pkill -x xfce4-session 2>/dev/null || true
 sleep 3
 
 # Start dbus
@@ -272,6 +274,8 @@ echo "  Runtime dir: /run/user/1000"
 echo "  Pulse socket: /run/pulse/native"
 echo "  DBus socket: /run/dbus/system_bus_socket"
 echo "  SSL Certificate: /etc/xrdp/xrdp-cert.pem"
+echo "  Color Depth: 16-bit (protocol compatibility)"
+echo "  Resolution: 1280x720"
 echo ""
 echo "To monitor logs:"
 echo "  docker exec -it xrdp tail -f /var/log/xrdp.log"
