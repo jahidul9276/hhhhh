@@ -10,12 +10,12 @@ services:
     restart: unless-stopped
     environment:
       - DISPLAY=:10
-      - XDG_RUNTIME_DIR=/run/user/0
+      - XDG_RUNTIME_DIR=/run/user/1000
       - PULSE_RUNTIME_PATH=/run/pulse
       - PULSE_SERVER=unix:/run/pulse/native
-      - HOME=/root
-      - USER=root
-      - XAUTHORITY=/root/.Xauthority
+      - HOME=/home/xrdpuser
+      - USER=xrdpuser
+      - XAUTHORITY=/home/xrdpuser/.Xauthority
       - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
       - TERM=xterm-256color
       - LANG=en_US.UTF-8
