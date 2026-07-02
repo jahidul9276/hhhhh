@@ -5,69 +5,49 @@ echo "========================================="
 echo "Starting XRDP Container Services"
 echo "========================================="
 
-# Create runtime directories if they don't exist
-mkdir -p /run/dbus
-mkdir -p /var/run/dbus
-mkdir -p /run/pulse
-mkdir -p /var/run/xrdp
-mkdir -p /var/run/xrdp-sesman
-mkdir -p /root/.config/pulse
+# Function to cleanup on exit
+cleanup() {
+    echo "Cleaning up..."
+    pkill -x xrdp 2>/dev/null || true
+    pkill -x xrdp-sesman 2>/dev/null || true
+    pkill -x pulseaudio 2>/dev/null || true
+    pkill -x dbus-daemon 2>/dev/null || true
+    rm -f /run/dbus/pid
+    exit 0
+}
 
-# Clean up any stale lock files
-rm -f /tmp/.X0-lock
-rm -f /var/run/xrdp/xrdp.pid
-rm -f /var/run/xrdp-sesman/xrdp-sesman.pid
-rm -f /run/pulse/pid
+trap cleanup SIGTERM SIGINT
 
-# Start dbus (required for xrdp)
-echo "[1/4] Starting dbus-daemon..."
-if ! pgrep -x "dbus-daemon" > /dev/null; then
-    dbus-daemon --system --fork --print-address 2>/dev/null || true
-    sleep 1
-    echo "dbus-daemon started successfully"
-else
-    echo "dbus-daemon already running"
-fi
+# Create directories
+mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
 
-# Start pulseaudio
-echo "[2/4] Starting pulseaudio..."
-if ! pgrep -x "pulseaudio" > /dev/null; then
-    # Create pulse cookie
-    pulseaudio --start --daemonize 2>/dev/null || true
-    sleep 1
-    
-    # Check if pulseaudio started
-    if pgrep -x "pulseaudio" > /dev/null; then
-        echo "pulseaudio started successfully"
-    else
-        echo "WARNING: pulseaudio failed to start, continuing anyway"
-    fi
-else
-    echo "pulseaudio already running"
-fi
+# Clean up stale files
+echo "Cleaning up stale files..."
+rm -f /run/dbus/pid /var/run/dbus/pid /tmp/.X0-lock
+rm -f /var/run/xrdp/xrdp.pid /var/run/xrdp-sesman/xrdp-sesman.pid
 
-# Start xrdp-sesman
-echo "[3/4] Starting xrdp-sesman..."
-if pgrep -x "xrdp-sesman" > /dev/null; then
-    echo "xrdp-sesman already running, killing old instance..."
-    pkill -x xrdp-sesman || true
-    sleep 1
-fi
+# Kill any existing processes
+echo "Stopping any existing processes..."
+pkill -x dbus-daemon 2>/dev/null || true
+pkill -x pulseaudio 2>/dev/null || true
+pkill -x xrdp-sesman 2>/dev/null || true
+pkill -x xrdp 2>/dev/null || true
+sleep 2
 
+# Start dbus
+echo "[1/3] Starting dbus-daemon..."
+dbus-daemon --system --fork
+sleep 1
+echo "dbus-daemon started"
+
+# Start sesman
+echo "[2/3] Starting xrdp-sesman..."
 /usr/sbin/xrdp-sesman --nofork &
-
-# Give sesman time to initialize
 sleep 3
-echo "xrdp-sesman started successfully"
 
 # Start xrdp
-echo "[4/4] Starting xrdp on port 3389..."
-if pgrep -x "xrdp" > /dev/null; then
-    echo "xrdp already running, killing old instance..."
-    pkill -x xrdp || true
-    sleep 1
-fi
-
+echo "[3/3] Starting xrdp on port 3389..."
 echo "========================================="
 echo "XRDP Server is ready!"
 echo "Connect to: localhost:3389"
