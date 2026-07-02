@@ -32,11 +32,15 @@ iproute2 \
 x11-utils \
 xauth \
 pm-utils \
+xserver-xorg-video-dummy \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
 # Set root password
 RUN echo "root:ja908070" | chpasswd
+
+# Create Xauthority file to fix xauth warning
+RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
 
 # Configure X11
 RUN mkdir -p /etc/X11
@@ -67,10 +71,45 @@ RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
 
+# Create Xorg configuration for xrdp (fix GPU issues)
+RUN mkdir -p /etc/X11/xrdp
+RUN cat >/etc/X11/xrdp/xorg.conf <<'EOF'
+Section "Device"
+    Identifier  "dummy"
+    Driver      "dummy"
+    VideoRam    256000
+    Option      "NoDDC" "1"
+    Option      "IgnoreEDID" "true"
+EndSection
+
+Section "Monitor"
+    Identifier  "dummy"
+    Option      "DPMS" "false"
+    HorizSync   28-80
+    VertRefresh 43-60
+EndSection
+
+Section "Screen"
+    Identifier  "default"
+    Device      "dummy"
+    Monitor     "dummy"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        Modes "1024x768" "800x600" "640x480"
+    EndSubSection
+EndSection
+
+Section "ServerLayout"
+    Identifier  "default"
+    Screen      "default"
+EndSection
+EOF
+
 # Remove light-locker to avoid warnings
 RUN apt-get remove -y light-locker || true
 
-# Disable xfce4-power-manager and light-locker from autostart (FIX FOR WARNINGS)
+# Disable unnecessary services from autostart
 RUN mkdir -p /root/.config/autostart
 RUN cat > /root/.config/autostart/light-locker.desktop <<'EOF'
 [Desktop Entry]
@@ -86,17 +125,6 @@ RUN cat > /root/.config/autostart/xfce4-power-manager.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Power Manager
-Exec=/bin/true
-Hidden=true
-NoDisplay=true
-X-GNOME-Autostart-enabled=false
-EOF
-
-# Also disable other unnecessary services
-RUN cat > /root/.config/autostart/org.gnome.SettingsDaemon.A11ySettings.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Accessibility Settings
 Exec=/bin/true
 Hidden=true
 NoDisplay=true
@@ -133,9 +161,12 @@ mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
 mkdir -p /root/.config/pulse /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
 
+# Create Xauthority if missing
+touch /root/.Xauthority && chmod 600 /root/.Xauthority
+
 # Clean up stale files
 echo "Cleaning up stale files..."
-rm -f /run/dbus/pid /var/run/dbus/pid /tmp/.X0-lock
+rm -f /run/dbus/pid /var/run/dbus/pid /tmp/.X0-lock /tmp/.X11-unix/X0
 rm -f /var/run/xrdp/xrdp.pid /var/run/xrdp-sesman/xrdp-sesman.pid /run/pulse/pid
 
 # Kill leftover processes
@@ -144,6 +175,7 @@ pkill -x dbus-daemon 2>/dev/null || true
 pkill -x pulseaudio 2>/dev/null || true
 pkill -x xrdp-sesman 2>/dev/null || true
 pkill -x xrdp 2>/dev/null || true
+pkill -x Xorg 2>/dev/null || true
 sleep 2
 
 # Start dbus
