@@ -47,27 +47,37 @@ telnet \
 ltrace \
 strace \
 openssl \
+policykit-1 \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user with sudo privileges
+RUN useradd -m -s /bin/bash xrdpuser && \
+    echo "xrdpuser:ja908070" | chpasswd && \
+    echo "xrdpuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Set root password
 RUN echo "root:ja908070" | chpasswd
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp /run/user/0 /tmp/.X11-unix /var/log/xrdp
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp /run/user/1000 /tmp/.X11-unix /var/log/xrdp
 RUN chmod 1777 /tmp/.X11-unix
-RUN chmod 700 /run/user/0
+RUN chmod 700 /run/user/1000
 RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman
 
-# Create Xauthority file
-RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
+# Create Xauthority files
+RUN touch /root/.Xauthority /home/xrdpuser/.Xauthority && \
+    chmod 600 /root/.Xauthority /home/xrdpuser/.Xauthority && \
+    chown xrdpuser:xrdpuser /home/xrdpuser/.Xauthority
 
 # Configure X11 wrapper
 RUN mkdir -p /etc/X11
 RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 
-# Set default session
+# Set default session for both users
 RUN echo "xfce4-session" > /root/.xsession
+RUN echo "xfce4-session" > /home/xrdpuser/.xsession && \
+    chown xrdpuser:xrdpuser /home/xrdpuser/.xsession
 
 # CRITICAL: Create COMPLETE xrdp configuration
 RUN cat >/etc/xrdp/xrdp.ini <<'EOF'
@@ -87,7 +97,6 @@ allow_root=true
 allow_console=true
 enable_token_login=false
 disable_root_login=false
-; Windows 11 compatibility
 rdp_ssl=yes
 ssl_cert_file=/etc/xrdp/xrdp-cert.pem
 ssl_key_file=/etc/xrdp/xrdp-key.pem
@@ -148,7 +157,21 @@ RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/xrdp/xrdp-key.pem -ou
     chmod 600 /etc/xrdp/xrdp-key.pem && \
     chmod 644 /etc/xrdp/xrdp-cert.pem
 
-# CRITICAL: Create COMPLETE sesman configuration with ALL possible root options
+# CRITICAL: Remove ALL security policies
+RUN rm -f /etc/polkit-1/localauthority/50-local.d/*.pkla 2>/dev/null || true && \
+    rm -f /etc/polkit-1/localauthority/10-vendor.d/*.pkla 2>/dev/null || true
+
+# CRITICAL: Disable polkit for xrdp
+RUN cat >/etc/polkit-1/localauthority/50-local.d/99-xrdp.pkla <<'EOF'
+[Allow xrdp]
+Identity=unix-user:*
+Action=*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+EOF
+
+# CRITICAL: Create sesman configuration
 RUN cat >/etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -156,21 +179,17 @@ ListenPort=3350
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
-; ALL possible root login options
 AllowRootLogin=true
 AllowConsoleLogin=true
 RootLoginAllowed=true
 DisableAuthentication=true
 EnableRemoteLogin=true
-; Disable all authorization checks
 AlwaysGroupCheck=false
 FuseMountName=thinclient_drives
-; Session settings
 SessionTimeout=0
 DisconnectedTimeLimit=0
 IdleTimeLimit=0
 KillDisconnected=false
-; Display settings
 XDisplay=10
 DisplayOffset=10
 MaxDisplayNumber=50
@@ -242,7 +261,7 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# CRITICAL: Create startwm.sh
+# Create startwm.sh
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
 # XRDP startwm.sh
@@ -253,18 +272,18 @@ export XDG_MENU_PREFIX=xfce-
 export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
 export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share:/usr/local/share
 export DISABLE_WAYLAND=1
-export XDG_RUNTIME_DIR=/run/user/0
-export XAUTHORITY=/root/.Xauthority
-export HOME=/root
-export USER=root
+export XDG_RUNTIME_DIR=/run/user/1000
+export XAUTHORITY=/home/xrdpuser/.Xauthority
+export HOME=/home/xrdpuser
+export USER=xrdpuser
 export SHELL=/bin/bash
 export DISPLAY=:10
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 
 # Create runtime directory
-mkdir -p /run/user/0
-chmod 700 /run/user/0
+mkdir -p /run/user/1000
+chmod 700 /run/user/1000
 
 # Clean up display locks
 rm -f /tmp/.X0-lock /tmp/.X10-lock /tmp/.X11-unix/X0 /tmp/.X11-unix/X10
@@ -285,8 +304,8 @@ RUN chmod +x /etc/xrdp/startwm.sh
 RUN apt-get remove -y light-locker xfce4-power-manager || true
 
 # Disable screensaver and power management
-RUN mkdir -p /root/.config/xfce4/xfconf/xfce-perchannel-xml
-RUN cat >/root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml <<'EOF'
+RUN mkdir -p /home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml
+RUN cat >/home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-power-manager" version="1.0">
   <property name="xfce4-power-manager" type="empty">
@@ -298,8 +317,10 @@ RUN cat >/root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml 
 </channel>
 EOF
 
+RUN chown -R xrdpuser:xrdpuser /home/xrdpuser/.config
+
 # Disable screensaver
-RUN cat >/root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<'EOF'
+RUN cat >/home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-screensaver" version="1.0">
   <property name="enabled" type="bool" value="false"/>
@@ -314,12 +335,12 @@ default-server = /run/pulse/native
 autospawn = no
 daemon-binary = /usr/bin/pulseaudio
 extra-arguments = --exit-idle-time=-1 --disable-shm=yes --realtime=no
-cookie-file = /root/.config/pulse/cookie
+cookie-file = /home/xrdpuser/.config/pulse/cookie
 enable-shm = no
 disable-shm = yes
 EOF
 
-# CRITICAL: Create start script with forced authorization bypass
+# CRITICAL: Create start script with COMPLETE bypass
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -332,7 +353,21 @@ echo "========================================="
 # ============================================
 # COMPLETE AUTHORIZATION BYPASS
 # ============================================
-echo "=== FORCE AUTHORIZATION BYPASS ==="
+echo "=== COMPLETE AUTHORIZATION BYPASS ==="
+
+# Remove ALL security policies
+rm -f /etc/polkit-1/localauthority/50-local.d/*.pkla 2>/dev/null || true
+rm -f /etc/polkit-1/localauthority/10-vendor.d/*.pkla 2>/dev/null || true
+
+# Create new policy allowing everything
+cat > /etc/polkit-1/localauthority/50-local.d/99-xrdp.pkla <<'POLKITEOF'
+[Allow xrdp]
+Identity=unix-user:*
+Action=*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+POLKITEOF
 
 # Force sesman settings
 cat > /etc/xrdp/sesman.ini <<'SESMANEOF'
@@ -453,18 +488,18 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 XRDPEOF
 
-echo "✓ Configuration files overwritten with root access"
+echo "✓ All configurations bypassed"
 
 # Setup mount namespace and permissions
 echo "Setting up mount namespace permissions..."
 
 # Create all necessary directories
 mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
-mkdir -p /root/.config/pulse /tmp/.X11-unix /run/user/0
+mkdir -p /home/xrdpuser/.config/pulse /tmp/.X11-unix /run/user/1000
 mkdir -p /tmp/thinclient_drives /var/lib/xrdp /var/log/xrdp
 mkdir -p /proc /sys /dev /dev/shm
 chmod 1777 /tmp/.X11-unix
-chmod 700 /run/user/0
+chmod 700 /run/user/1000
 chmod 755 /var/run/xrdp /var/run/xrdp-sesman /tmp/thinclient_drives
 
 # Mount proc and sys
@@ -502,7 +537,8 @@ if ! mountpoint -q /dev/pts; then
 fi
 
 # Create Xauthority
-touch /root/.Xauthority && chmod 600 /root/.Xauthority
+touch /home/xrdpuser/.Xauthority && chmod 600 /home/xrdpuser/.Xauthority
+chown xrdpuser:xrdpuser /home/xrdpuser/.Xauthority
 
 # Clean up stale files
 echo "Cleaning up stale files..."
@@ -534,7 +570,7 @@ pulseaudio --start --daemonize --exit-idle-time=-1 --disable-shm=yes --realtime=
 sleep 2
 echo "✓ pulseaudio configured"
 
-# Start xrdp-sesman
+# Start xrdp-sesman with xrdpuser
 echo "[3/5] Starting xrdp-sesman..."
 echo "Verifying sesman configuration:"
 echo "----------------------------------------"
@@ -571,9 +607,14 @@ echo "[5/5] XRDP Server ready!"
 echo "========================================="
 echo "✓ XRDP Server is ready!"
 echo "  Connect to: localhost:3389"
+echo ""
+echo "  OPTION 1 - Login with non-root user (RECOMMENDED):"
+echo "  Username: xrdpuser"
+echo "  Password: ja908070"
+echo ""
+echo "  OPTION 2 - Login with root (if still having issues):"
 echo "  Username: root"
 echo "  Password: ja908070"
-echo "  Session: Xorg (Display :10)"
 echo "========================================="
 echo ""
 echo "AUTHORIZATION STATUS:"
@@ -585,8 +626,8 @@ echo "========================================="
 echo ""
 echo "Session Information:"
 echo "  Display: :10"
-echo "  Xauthority: /root/.Xauthority"
-echo "  Runtime dir: /run/user/0"
+echo "  Xauthority: /home/xrdpuser/.Xauthority"
+echo "  Runtime dir: /run/user/1000"
 echo "  Pulse socket: /run/pulse/native"
 echo "  DBus socket: /run/dbus/system_bus_socket"
 echo "  SSL Certificate: /etc/xrdp/xrdp-cert.pem"
