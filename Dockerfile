@@ -63,8 +63,6 @@ RUN sed -i 's/^#.*port=3389/port=3389/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*tcp_send_buffer_bytes=.*/tcp_send_buffer_bytes=32768/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*tcp_recv_buffer_bytes=.*/tcp_recv_buffer_bytes=32768/g' /etc/xrdp/xrdp.ini
 
 # Create necessary directories
 RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp
@@ -101,26 +99,38 @@ mkdir -p /root/.config/pulse
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
 
-# Clean up stale files
+# Clean up stale PID files (FIX FOR DBUS ERROR)
+echo "Cleaning up stale PID files..."
+rm -f /run/dbus/pid
+rm -f /var/run/dbus/pid
 rm -f /tmp/.X0-lock
 rm -f /var/run/xrdp/xrdp.pid
 rm -f /var/run/xrdp-sesman/xrdp-sesman.pid
 rm -f /run/pulse/pid
 
-# Start dbus
+# Kill any leftover processes
+echo "Cleaning up leftover processes..."
+pkill -x dbus-daemon 2>/dev/null || true
+pkill -x pulseaudio 2>/dev/null || true
+pkill -x xrdp-sesman 2>/dev/null || true
+pkill -x xrdp 2>/dev/null || true
+sleep 2
+
+# Start dbus (with fresh PID file)
 echo "[1/4] Starting dbus-daemon..."
-if ! pgrep -x "dbus-daemon" > /dev/null; then
-    dbus-daemon --system --fork
-    sleep 1
+dbus-daemon --system --fork
+sleep 1
+if pgrep -x "dbus-daemon" > /dev/null; then
     echo "dbus-daemon started (PID: $(pgrep -x dbus-daemon))"
 else
-    echo "dbus-daemon already running"
+    echo "ERROR: dbus-daemon failed to start"
+    exit 1
 fi
 
 # Start pulseaudio
 echo "[2/4] Starting pulseaudio..."
 if ! pgrep -x "pulseaudio" > /dev/null; then
-    pulseaudio --start --daemonize || echo "Pulseaudio start failed, continuing..."
+    pulseaudio --start --daemonize 2>/dev/null || echo "Pulseaudio start failed, continuing..."
     sleep 1
     if pgrep -x "pulseaudio" > /dev/null; then
         echo "pulseaudio started (PID: $(pgrep -x pulseaudio))"
@@ -131,24 +141,19 @@ fi
 
 # Start xrdp-sesman
 echo "[3/4] Starting xrdp-sesman..."
-pkill -x xrdp-sesman 2>/dev/null || true
-sleep 1
-
 /usr/sbin/xrdp-sesman --nofork &
 SESMAN_PID=$!
-sleep 2
+sleep 3
 
 if ps -p $SESMAN_PID > /dev/null 2>&1; then
     echo "xrdp-sesman started (PID: $SESMAN_PID)"
 else
     echo "WARNING: xrdp-sesman failed to start"
+    exit 1
 fi
 
 # Start xrdp
 echo "[4/4] Starting xrdp on port 3389..."
-pkill -x xrdp 2>/dev/null || true
-sleep 1
-
 echo "========================================="
 echo "XRDP Server is ready!"
 echo "Connect to: localhost:3389"
