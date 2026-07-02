@@ -15,8 +15,7 @@ curl \
 wget \
 nano \
 net-tools \
-polkitd \
-pkexec \
+policykit-1 \
 pulseaudio \
 pulseaudio-utils \
 firefox-esr \
@@ -30,8 +29,7 @@ wine \
 wine32 \
 libc6:i386 \
 procps \
-xauth \
-xorg \
+iproute2 \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
@@ -52,21 +50,20 @@ EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Ensure xrdp uses the correct session
+# Configure xrdp
 RUN sed -i 's/^#.*port=3389/port=3389/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
 
-# Allow root login
-RUN sed -i 's/^#AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini || \
-    echo "AllowRootLogin=true" >> /etc/xrdp/sesman.ini
+# Create necessary directories
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse
 
-# Create necessary directories for xrdp
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/0
-RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus
-RUN chmod 755 /run/user/0
-
+# Create pulse client config
+RUN mkdir -p /etc/pulse
 COPY pulse-client.conf /etc/pulse/client.conf
 
+# Create start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
