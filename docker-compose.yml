@@ -22,6 +22,9 @@ services:
       - LC_ALL=en_US.UTF-8
       - DISPLAY_WIDTH=1920
       - DISPLAY_HEIGHT=1080
+      # CRITICAL: Allow root login
+      - ALLOW_ROOT_LOGIN=true
+      - DISABLE_AUTHENTICATION=true
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - xrdp-data:/var/lib/xrdp
