@@ -52,15 +52,14 @@ libpam-modules \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user with sudo privileges
+# Create users
 RUN useradd -m -s /bin/bash xrdpuser && \
     echo "xrdpuser:ja908070" | chpasswd && \
     echo "xrdpuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Set root password
 RUN echo "root:ja908070" | chpasswd
 
-# Create necessary directories with proper permissions
+# Create necessary directories
 RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp /run/user/1000 /tmp/.X11-unix /var/log/xrdp
 RUN chmod 1777 /tmp/.X11-unix
 RUN chmod 700 /run/user/1000
@@ -75,109 +74,36 @@ RUN touch /root/.Xauthority /home/xrdpuser/.Xauthority && \
 RUN mkdir -p /etc/X11
 RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 
-# Set default session for both users
+# Set default session
 RUN echo "xfce4-session" > /root/.xsession
 RUN echo "xfce4-session" > /home/xrdpuser/.xsession && \
     chown xrdpuser:xrdpuser /home/xrdpuser/.xsession
 
-# CRITICAL: Create COMPLETE PAM configuration
+# CRITICAL FIX: Create PAM that ALWAYS allows login
 RUN mkdir -p /etc/pam.d
 RUN cat > /etc/pam.d/xrdp-sesman <<'PAMEOF'
 #%PAM-1.0
-auth        required      pam_permit.so
+auth        sufficient    pam_permit.so
 auth        required      pam_env.so
-account     required      pam_permit.so
-session     required      pam_permit.so
+account     sufficient    pam_permit.so
+session     sufficient    pam_permit.so
 session     optional      pam_motd.so
 PAMEOF
 
 RUN cat > /etc/pam.d/xrdp <<'PAMEOF'
 #%PAM-1.0
-auth        required      pam_permit.so
+auth        sufficient    pam_permit.so
 auth        required      pam_env.so
-account     required      pam_permit.so
-session     required      pam_permit.so
+account     sufficient    pam_permit.so
+session     sufficient    pam_permit.so
 PAMEOF
-
-# CRITICAL: Create COMPLETE xrdp configuration
-RUN cat > /etc/xrdp/xrdp.ini <<'EOF'
-[Globals]
-ini_version=1
-fork=true
-port=3389
-use_vsock=false
-tcp_nodelay=true
-tcp_keepalive=true
-security_layer=negotiate
-crypt_level=low
-max_bpp=16
-xserverbpp=16
-codecs=
-allow_root=true
-allow_console=true
-enable_token_login=false
-disable_root_login=false
-rdp_ssl=yes
-ssl_cert_file=/etc/xrdp/xrdp-cert.pem
-ssl_key_file=/etc/xrdp/xrdp-key.pem
-ssl_verify=no
-rdp_use_ssl=yes
-crypto_use_fips=false
-tcp_send_buffer_bytes=262144
-tcp_recv_buffer_bytes=262144
-max_connections=100
-rdp_enhanced_security=yes
-tls_min_version=1.0
-tls_max_version=1.3
-
-[Xorg]
-name=Xorg
-lib=libxup.so
-username=root
-password=ja908070
-ip=127.0.0.1
-port=-1
-xserverbpp=16
-codecs=
-security_layer=negotiate
-crypt_level=low
-max_bpp=16
-
-[X11rdp]
-name=X11rdp
-lib=libxup.so
-username=root
-password=ja908070
-ip=127.0.0.1
-port=-1
-xserverbpp=16
-codecs=
-security_layer=negotiate
-crypt_level=low
-max_bpp=16
-
-[Chansrv]
-name=Chansrv
-lib=libchansrv.so
-username=root
-password=ja908070
-ip=127.0.0.1
-port=-1
-
-[SessionVariables]
-X11DisplayOffset=10
-MaxDisplayNumber=50
-KillDisconnected=false
-IdleTimeLimit=0
-DisconnectedTimeLimit=0
-EOF
 
 # Generate SSL certificates
 RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/xrdp/xrdp-key.pem -out /etc/xrdp/xrdp-cert.pem -days 365 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" && \
     chmod 600 /etc/xrdp/xrdp-key.pem && \
     chmod 644 /etc/xrdp/xrdp-cert.pem
 
-# Disable polkit for xrdp
+# Disable polkit
 RUN rm -f /etc/polkit-1/localauthority/50-local.d/*.pkla 2>/dev/null || true && \
     rm -f /etc/polkit-1/localauthority/10-vendor.d/*.pkla 2>/dev/null || true
 
@@ -191,53 +117,7 @@ ResultInactive=yes
 ResultActive=yes
 EOF
 
-# CRITICAL: Create sesman configuration with ALL auth disabled
-RUN cat > /etc/xrdp/sesman.ini <<'EOF'
-[Globals]
-ListenAddress=127.0.0.1
-ListenPort=3350
-EnableUserWindowManager=true
-UserWindowManager=startwm.sh
-DefaultWindowManager=startwm.sh
-AllowRootLogin=true
-AllowConsoleLogin=true
-RootLoginAllowed=true
-DisableAuthentication=true
-EnableRemoteLogin=true
-AlwaysGroupCheck=false
-FuseMountName=thinclient_drives
-SessionTimeout=0
-DisconnectedTimeLimit=0
-IdleTimeLimit=0
-KillDisconnected=false
-XDisplay=10
-DisplayOffset=10
-MaxDisplayNumber=50
-UseXOrg=1
-X11rdpPath=/usr/lib/xorg/Xorg
-
-[X11rdp]
-param=Xorg
-param=-config
-param=xrdp/xorg.conf
-param=-noreset
-param=-nolisten
-param=tcp
-param=-logfile
-param=.xorgxrdp.%s.log
-
-[Chansrv]
-FuseMountName=thinclient_drives
-
-[SessionVariables]
-X11DisplayOffset=10
-MaxDisplayNumber=50
-KillDisconnected=false
-IdleTimeLimit=0
-DisconnectedTimeLimit=0
-EOF
-
-# Create Xorg configuration with proper video settings
+# Create Xorg configuration
 RUN mkdir -p /etc/X11/xorg.conf.d
 RUN cat > /etc/X11/xorg.conf.d/99-dummy.conf <<'EOF'
 Section "Device"
@@ -281,10 +161,9 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# Create startwm.sh with proper Xorg startup
+# Create startwm.sh
 RUN cat > /etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
-# XRDP startwm.sh
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 export XDG_CURRENT_DESKTOP=XFCE
@@ -301,29 +180,25 @@ export DISPLAY=:10
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 
-# Create runtime directory
 mkdir -p /run/user/1000
 chmod 700 /run/user/1000
 
-# Clean up display locks
 rm -f /tmp/.X0-lock /tmp/.X10-lock /tmp/.X11-unix/X0 /tmp/.X11-unix/X10
 
-# Start DBus session
 if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
     eval `dbus-launch --sh-syntax --exit-with-session`
     export DBUS_SESSION_BUS_ADDRESS
 fi
 
-# Start XFCE with proper options
 exec startxfce4 --display=:10
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Remove light-locker and power manager
+# Remove lockers
 RUN apt-get remove -y light-locker xfce4-power-manager || true
 
-# Disable screensaver and power management
+# Disable screensaver
 RUN mkdir -p /home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml
 RUN cat > /home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -339,7 +214,6 @@ EOF
 
 RUN chown -R xrdpuser:xrdpuser /home/xrdpuser/.config
 
-# Disable screensaver
 RUN cat > /home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-screensaver" version="1.0">
