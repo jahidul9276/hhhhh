@@ -41,7 +41,11 @@ docker exec $CONTAINER ls -la /root/.Xauthority /home/xrdpuser/.Xauthority 2>/de
 
 echo ""
 echo "9. Check if port 3389 is listening:"
-docker exec $CONTAINER netstat -tlnp | grep 3389
+docker exec $CONTAINER netstat -tlnp 2>/dev/null | grep 3389 || echo "Port 3389 not listening"
+
+echo ""
+echo "10. Test connection to sesman:"
+docker exec $CONTAINER nc -zv 127.0.0.1 3350 2>&1 || echo "Sesman not listening on port 3350"
 
 echo ""
 echo "========================================="
