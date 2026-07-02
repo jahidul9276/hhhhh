@@ -22,9 +22,11 @@ services:
       - LC_ALL=en_US.UTF-8
       - DISPLAY_WIDTH=1920
       - DISPLAY_HEIGHT=1080
-      # CRITICAL: Allow root login
+      # Windows 11 specific
       - ALLOW_ROOT_LOGIN=true
-      - DISABLE_AUTHENTICATION=true
+      - DISABLE_AUTHENTICATION=false
+      - RDP_SSL=yes
+      - USE_TLS=true
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - xrdp-data:/var/lib/xrdp
