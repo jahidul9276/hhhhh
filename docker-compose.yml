@@ -6,31 +6,29 @@ services:
     privileged: true
     ports:
       - "3389:3389"
+      - "8080:8080"  # Hermes gateway port
     restart: unless-stopped
     environment:
-      - DISPLAY=:0
-      - XDG_RUNTIME_DIR=/tmp
+      - DISPLAY=:10
+      - XDG_RUNTIME_DIR=/run/user/0
       - PULSE_RUNTIME_PATH=/run/pulse
       - PULSE_SERVER=unix:/run/pulse/native
-      - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
+      - HOME=/root
+      - USER=root
+      - XAUTHORITY=/root/.Xauthority
+      - HERMES_PORT=8080
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /run/user/1000/pulse:/run/pulse/host:ro
       - xrdp-data:/var/lib/xrdp
-      - dbus-data:/run/dbus
-      - pulse-data:/run/pulse
+      - hermes-data:/root/.hermes
     cap_add:
       - SYS_ADMIN
       - DAC_READ_SEARCH
       - NET_ADMIN
       - IPC_LOCK
-      - SYS_CHROOT
     security_opt:
       - apparmor:unconfined
       - seccomp=unconfined
-    devices:
-      - /dev/snd:/dev/snd:rw
-      - /dev/dri:/dev/dri:rw
     tmpfs:
       - /run:exec
       - /tmp:exec
@@ -39,9 +37,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
 volumes:
   xrdp-data:
-  dbus-data:
-  pulse-data:
+  hermes-data:
