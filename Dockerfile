@@ -39,11 +39,8 @@ xserver-xorg-video-dummy \
 # Set root password
 RUN echo "root:ja908070" | chpasswd
 
-# Create Xauthority file
+# Create Xauthority file to fix xauth warning
 RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
-
-# Fix XDG_RUNTIME_DIR permissions (FIXES THE WARNING)
-RUN chmod 700 /tmp
 
 # Configure X11
 RUN mkdir -p /etc/X11
@@ -52,9 +49,10 @@ RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 # Set default session
 RUN echo "xfce4-session" > /root/.xsession
 
-# Fix xrdp startup script
+# Fix xrdp startup script - CRITICAL FIX
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
+# XRDP startwm.sh for XFCE
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 export XDG_CURRENT_DESKTOP=XFCE
@@ -62,19 +60,30 @@ export XDG_MENU_PREFIX=xfce-
 export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
 export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
 export DISABLE_WAYLAND=1
-export XDG_RUNTIME_DIR=/tmp
+export XDG_RUNTIME_DIR=/run/user/0
+
+# Create runtime directory
+mkdir -p /run/user/0
+chmod 700 /run/user/0
+
+# Start XFCE
 exec startxfce4
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Configure xrdp
+# Configure xrdp - FIX LOGIN ISSUE
 RUN sed -i 's/^#.*port=3389/port=3389/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^#.*ssl_protocols=.*/ssl_protocols=TLSv1.2,TLSv1.3/g' /etc/xrdp/xrdp.ini
 
-# Create Xorg configuration
+# Fix session management - CRITICAL
+RUN sed -i 's/^#.*FuseMountName=.*/FuseMountName=thinclient_drives/g' /etc/xrdp/sesman.ini
+RUN sed -i 's/^#.*FuseMountPath=.*/FuseMountPath=/tmp/thinclient_drives/g' /etc/xrdp/sesman.ini
+
+# Create Xorg configuration for xrdp
 RUN mkdir -p /etc/X11/xrdp
 RUN cat >/etc/X11/xrdp/xorg.conf <<'EOF'
 Section "Device"
@@ -109,10 +118,10 @@ Section "ServerLayout"
 EndSection
 EOF
 
-# Remove light-locker
+# Remove light-locker to avoid warnings
 RUN apt-get remove -y light-locker || true
 
-# Disable unnecessary services
+# Disable unnecessary services from autostart
 RUN mkdir -p /root/.config/autostart
 RUN cat > /root/.config/autostart/light-locker.desktop <<'EOF'
 [Desktop Entry]
@@ -134,18 +143,8 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=false
 EOF
 
-RUN cat > /root/.config/autostart/xfce4-settings-helper.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Settings Helper
-Exec=/bin/true
-Hidden=true
-NoDisplay=true
-X-GNOME-Autostart-enabled=false
-EOF
-
-# Create directories
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp
+# Create necessary directories
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp /run/user/0
 
 # Create pulse client config
 RUN mkdir -p /etc/pulse
@@ -160,7 +159,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# Create start script with suppressed warnings
+# Create start script - FIXED
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -171,11 +170,11 @@ echo "========================================="
 
 # Create runtime directories
 mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
-mkdir -p /root/.config/pulse /tmp/.X11-unix
+mkdir -p /root/.config/pulse /tmp/.X11-unix /run/user/0
 chmod 1777 /tmp/.X11-unix
-chmod 700 /tmp  # Fix XDG_RUNTIME_DIR warning
+chmod 700 /run/user/0
 
-# Create Xauthority
+# Create Xauthority if missing
 touch /root/.Xauthority && chmod 600 /root/.Xauthority
 
 # Clean up stale files
