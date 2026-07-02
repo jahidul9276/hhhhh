@@ -191,7 +191,7 @@ ResultInactive=yes
 ResultActive=yes
 EOF
 
-# CRITICAL: Create sesman configuration with DisableAuthentication=true
+# CRITICAL: Create sesman configuration with ALL auth disabled
 RUN cat > /etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
