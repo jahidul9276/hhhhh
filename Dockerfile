@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture for 32-bit support
 RUN dpkg --add-architecture i386
 
-# Install all required packages
+# Install all required packages - REMOVED DUPLICATE 'certificates'
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -41,14 +41,12 @@ xorg \
 xvfb \
 x11vnc \
 openssh-server \
-net-tools \
 dnsutils \
 iputils-ping \
 telnet \
 ltrace \
 strace \
 openssl \
-certificates \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
