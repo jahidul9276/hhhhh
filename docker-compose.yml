@@ -9,9 +9,11 @@ services:
     restart: unless-stopped
     environment:
       - DISPLAY=:0
-      - XDG_RUNTIME_DIR=/tmp
+      - XDG_RUNTIME_DIR=/run/user/0
       - PULSE_RUNTIME_PATH=/run/pulse
       - PULSE_SERVER=unix:/run/pulse/native
+      - HOME=/root
+      - USER=root
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - xrdp-data:/var/lib/xrdp
@@ -20,6 +22,8 @@ services:
       - DAC_READ_SEARCH
       - NET_ADMIN
       - IPC_LOCK
+      - SETUID
+      - SETGID
     security_opt:
       - apparmor:unconfined
       - seccomp=unconfined
