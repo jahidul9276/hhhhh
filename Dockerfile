@@ -1,11 +1,9 @@
-FROM ubuntu:24.04
+FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Add i386 architecture for Wine support
 RUN dpkg --add-architecture i386
 
-# Update and install all required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -17,11 +15,15 @@ curl \
 wget \
 nano \
 net-tools \
+polkitd \
+pkexec \
 pulseaudio \
 pulseaudio-utils \
-firefox \
+firefox-esr \
+firejail \
 python3 \
 python3-pip \
+python3-venv \
 build-essential \
 ca-certificates \
 wine \
@@ -30,192 +32,44 @@ libc6:i386 \
 procps \
 xauth \
 xorg \
-policykit-1 \
-iproute2 \
-software-properties-common \
-apt-utils \
-vim \
-htop \
-telnet \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -m -s /bin/bash xrdpuser && \
-    echo "xrdpuser:ja908070" | chpasswd && \
-    usermod -aG sudo xrdpuser
-
-# Set root password (for emergency)
 RUN echo "root:ja908070" | chpasswd
 
-# Create X11 configuration
 RUN mkdir -p /etc/X11
 RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 
-# Set default X session for user
-RUN mkdir -p /home/xrdpuser/.config/xfce4 && \
-    echo "xfce4-session" > /home/xrdpuser/.xsession && \
-    echo "startxfce4" > /home/xrdpuser/.xsessionrc && \
-    chown -R xrdpuser:xrdpuser /home/xrdpuser
+RUN echo "xfce4-session" > /root/.xsession
 
-# Create xrdp startup script
+# Fix xrdp startup script
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
-export DISPLAY=:0
-export XDG_RUNTIME_DIR=/run/user/1000
-export HOME=/home/xrdpuser
-export SHELL=/bin/bash
-export LANG=en_US.UTF-8
-export LANGUAGE=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
 exec startxfce4
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Configure xrdp
-RUN cat > /etc/xrdp/xrdp.ini <<'EOF'
-[Globals]
-ini_version=1
-fork=true
-port=3389
-use_vsock=false
-crypt_level=low
-channel_code=1
-max_bpp=32
-xserverbpp=24
-ssl_protocols=TLSv1.2,TLSv1.3
-ssl_ciphers=HIGH
-enable_fuse=true
-fuse_mount_name=thinclient_drives
-fuse_mount_path=/tmp/fuse_mount
-fuse_allow_other=true
-tcp_send_buffer_bytes=32768
-tcp_recv_buffer_bytes=32768
+# Ensure xrdp uses the correct session
+RUN sed -i 's/^#.*port=3389/port=3389/g' /etc/xrdp/xrdp.ini
+RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 
-[Xorg]
-name=Xorg
-lib=libxup.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=20
+# Allow root login
+RUN sed -i 's/^#AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini || \
+    echo "AllowRootLogin=true" >> /etc/xrdp/sesman.ini
 
-[Xvnc]
-name=Xvnc
-lib=libvnc.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=1
-
-[XRDP]
-name=XRDP
-lib=libxrdp.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=10
-
-[Chansrv]
-name=Chansrv
-lib=libxrdpchansrv.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=3
-EOF
-
-# Configure sesman
-RUN cat > /etc/xrdp/sesman.ini <<'EOF'
-[Globals]
-ListenAddress=127.0.0.1
-ListenPort=3350
-EnableUserWindowManager=true
-UserWindowManager=startxfce4
-DefaultWindowManager=startxfce4
-MaxSessions=10
-MaxDisconnections=10
-SessionTimeout=0
-
-[Xorg]
-param=Xorg
-param=-config
-param=xrdp/xorg.conf
-param=-noreset
-param=-nolisten
-param=tcp
-param=-logfile
-param=.xorgxrdp.%s.log
-
-[Xvnc]
-param=Xvnc
-param=-bs
-param=-auth
-param=.Xauthority
-param=-geometry
-param=%%GEOMETRY%%
-param=-depth
-param=%%COLORDEPTH%%
-param=-rfbauth
-param=.vncpasswd
-param=-localhost
-param=-dpi
-param=%%DPI%%
-
-[Chansrv]
-param=chansrv
-param=-audio
-param=-videofifo
-param=/tmp/xrdp-video-fifo
-param=-videopidfifo
-param=/tmp/xrdp-video-pid-fifo
-
-[SessionVariables]
-X11DisplayOffset=10
-MaxDisplayNumber=10
-AllowRootLogin=true
-AllowConsole=true
-EnableUserWindowManager=true
-UserWindowManager=startxfce4
-DefaultWindowManager=startxfce4
-FuseMountName=thinclient_drives
-FuseMountPath=/tmp/fuse_mount
-KillDisconnected=false
-DisconnectedTimeLimit=0
-IdleTimeLimit=0
-Policy=Default
-EOF
-
-# Create necessary directories
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/1000 /var/log/xrdp
+# Create necessary directories for xrdp
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/user/0
 RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman /run/dbus
-RUN chmod 755 /run/user/1000 /var/log/xrdp
+RUN chmod 755 /run/user/0
 
-# Create .Xauthority for user
-RUN touch /home/xrdpuser/.Xauthority && \
-    chown xrdpuser:xrdpuser /home/xrdpuser/.Xauthority && \
-    chmod 600 /home/xrdpuser/.Xauthority
-
-# Create .Xauthority for root
-RUN touch /root/.Xauthority && chmod 600 /root/.Xauthority
-
-# Copy configuration files
 COPY pulse-client.conf /etc/pulse/client.conf
+
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Set working directory
-WORKDIR /home/xrdpuser
-
-# Expose RDP port
 EXPOSE 3389
 
-# Start script
 CMD ["/start.sh"]
