@@ -47,6 +47,8 @@ iputils-ping \
 telnet \
 ltrace \
 strace \
+openssl \
+certificates \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
@@ -69,53 +71,7 @@ RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 # Set default session
 RUN echo "xfce4-session" > /root/.xsession
 
-# CRITICAL FIX: Allow root login in xrdp
-RUN sed -i 's/^#*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
-
-# Create Xorg configuration - FIXED for dummy display
-RUN mkdir -p /etc/X11/xorg.conf.d
-RUN cat >/etc/X11/xorg.conf.d/99-dummy.conf <<'EOF'
-Section "Device"
-    Identifier  "DummyDevice"
-    Driver      "dummy"
-    Option      "ConstantDPI" "true"
-    Option      "NoDDC" "true"
-    Option      "IgnoreEDID" "true"
-    Option      "UseDisplayDevice" "none"
-    VideoRam    256000
-EndSection
-
-Section "Monitor"
-    Identifier  "DummyMonitor"
-    HorizSync   28-80
-    VertRefresh 43-60
-    Option      "DPMS" "false"
-    Option      "Enable" "true"
-EndSection
-
-Section "Screen"
-    Identifier  "DummyScreen"
-    Device      "DummyDevice"
-    Monitor     "DummyMonitor"
-    DefaultDepth 24
-    SubSection "Display"
-        Depth 24
-        Modes "1920x1080" "1280x720" "1024x768" "800x600"
-    EndSubSection
-EndSection
-
-Section "ServerLayout"
-    Identifier  "DummyLayout"
-    Screen      "DummyScreen"
-    Option      "BlankTime" "0"
-    Option      "StandbyTime" "0"
-    Option      "SuspendTime" "0"
-    Option      "OffTime" "0"
-EndSection
-EOF
-
-# CRITICAL FIX: Create proper xrdp configuration with root access
+# CRITICAL: Configure xrdp for Windows 11 compatibility
 RUN cat >/etc/xrdp/xrdp.ini <<'EOF'
 [Globals]
 ini_version=1
@@ -126,16 +82,30 @@ tcp_nodelay=true
 tcp_keepalive=true
 security_layer=negotiate
 crypt_level=high
-max_bpp=24
-xserverbpp=24
+max_bpp=32
+xserverbpp=32
 codecs=
 allow_root=true
 allow_console=true
 enable_token_login=false
-# Disable root login restrictions
 disable_root_login=false
-;allow_root=true
-;allow_console=true
+# Windows 11 compatibility settings
+rdp_ssl=yes
+ssl_cert_file=/etc/xrdp/xrdp-cert.pem
+ssl_key_file=/etc/xrdp/xrdp-key.pem
+ssl_verify=no
+ssl_ciphers=ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384
+rdp_use_ssl=yes
+crypto_use_fips=false
+; Network settings for Windows 11
+tcp_send_buffer_bytes=262144
+tcp_recv_buffer_bytes=262144
+max_connections=100
+; Enable RDP8.0 features
+rdp_enhanced_security=yes
+; Force TLS 1.2 for Windows 11
+tls_min_version=1.2
+tls_max_version=1.3
 
 [Xorg]
 name=Xorg
@@ -144,12 +114,11 @@ username=root
 password=ja908070
 ip=127.0.0.1
 port=-1
-xserverbpp=24
+xserverbpp=32
 codecs=
-; Disable root login checks
 security_layer=negotiate
 crypt_level=high
-max_bpp=24
+max_bpp=32
 
 [X11rdp]
 name=X11rdp
@@ -158,12 +127,11 @@ username=root
 password=ja908070
 ip=127.0.0.1
 port=-1
-xserverbpp=24
+xserverbpp=32
 codecs=
-; Disable root login checks
 security_layer=negotiate
 crypt_level=high
-max_bpp=24
+max_bpp=32
 
 [Chansrv]
 name=Chansrv
@@ -181,7 +149,12 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 EOF
 
-# CRITICAL FIX: Configure sesman to allow root
+# Generate SSL certificates for Windows 11 compatibility
+RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/xrdp/xrdp-key.pem -out /etc/xrdp/xrdp-cert.pem -days 365 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" && \
+    chmod 600 /etc/xrdp/xrdp-key.pem && \
+    chmod 644 /etc/xrdp/xrdp-cert.pem
+
+# CRITICAL: Configure sesman for Windows 11
 RUN cat >/etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -190,17 +163,22 @@ EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
 SessionVariables=XDG_CURRENT_DESKTOP=XFCE,XDG_MENU_PREFIX=xfce-,XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg,XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
-; Allow root login
 AllowRootLogin=true
 AllowConsoleLogin=true
 RootLoginAllowed=true
-; Disable authentication for local connections
-DisableAuthentication=true
-; Session timeout settings
+DisableAuthentication=false
+# Windows 11 compatibility
+EnableRemoteLogin=true
 SessionTimeout=0
 DisconnectedTimeLimit=0
 IdleTimeLimit=0
 KillDisconnected=false
+# Use Xorg for better compatibility
+XDisplay=10
+DisplayOffset=10
+MaxDisplayNumber=50
+UseXOrg=1
+X11rdpPath=/usr/lib/xorg/Xorg
 
 [X11rdp]
 param=Xorg
@@ -223,10 +201,54 @@ IdleTimeLimit=0
 DisconnectedTimeLimit=0
 EOF
 
-# Create xrdp startup script - FIXED with proper session handling
+# Create Xorg configuration for better Windows 11 compatibility
+RUN mkdir -p /etc/X11/xorg.conf.d
+RUN cat >/etc/X11/xorg.conf.d/99-dummy.conf <<'EOF'
+Section "Device"
+    Identifier  "DummyDevice"
+    Driver      "dummy"
+    Option      "ConstantDPI" "true"
+    Option      "NoDDC" "true"
+    Option      "IgnoreEDID" "true"
+    Option      "UseDisplayDevice" "none"
+    Option      "NoRandR" "false"
+    VideoRam    256000
+EndSection
+
+Section "Monitor"
+    Identifier  "DummyMonitor"
+    HorizSync   28-80
+    VertRefresh 43-60
+    Option      "DPMS" "false"
+    Option      "Enable" "true"
+    Option      "PreferredMode" "1920x1080"
+EndSection
+
+Section "Screen"
+    Identifier  "DummyScreen"
+    Device      "DummyDevice"
+    Monitor     "DummyMonitor"
+    DefaultDepth 32
+    SubSection "Display"
+        Depth 32
+        Modes "1920x1080" "1280x720" "1024x768" "800x600"
+    EndSubSection
+EndSection
+
+Section "ServerLayout"
+    Identifier  "DummyLayout"
+    Screen      "DummyScreen"
+    Option      "BlankTime" "0"
+    Option      "StandbyTime" "0"
+    Option      "SuspendTime" "0"
+    Option      "OffTime" "0"
+EndSection
+EOF
+
+# Create xrdp startup script
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
-# XRDP startwm.sh for XFCE with root access
+# XRDP startwm.sh for XFCE with Windows 11 compatibility
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 export XDG_CURRENT_DESKTOP=XFCE
@@ -240,6 +262,8 @@ export HOME=/root
 export USER=root
 export SHELL=/bin/bash
 export DISPLAY=:10
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
 
 # Create runtime directory
 mkdir -p /run/user/0
@@ -299,7 +323,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# Create start script with complete mount/namespace support
+# Create start script with Windows 11 compatibility
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -430,11 +454,18 @@ echo ""
 
 echo "[5/5] XRDP Server ready!"
 echo "========================================="
-echo "✓ XRDP Server is ready!"
+echo "✓ XRDP Server is ready for Windows 11!"
 echo "  Connect to: localhost:3389"
 echo "  Username: root"
 echo "  Password: ja908070"
 echo "  Session: Xorg (Display :10)"
+echo "========================================="
+echo ""
+echo "Windows 11 Connection Settings:"
+echo "  - Use RDP Client (mstsc.exe)"
+echo "  - Allow TLS 1.2/1.3"
+echo "  - Ignore certificate warnings"
+echo "  - Use 32-bit color depth"
 echo "========================================="
 echo ""
 echo "Session Information:"
@@ -443,6 +474,7 @@ echo "  Xauthority: /root/.Xauthority"
 echo "  Runtime dir: /run/user/0"
 echo "  Pulse socket: /run/pulse/native"
 echo "  DBus socket: /run/dbus/system_bus_socket"
+echo "  SSL Certificate: /etc/xrdp/xrdp-cert.pem"
 echo ""
 echo "Mount Information:"
 echo "  /proc: $(mount | grep /proc | head -1)"
@@ -464,25 +496,30 @@ RUN chmod +x /start.sh
 # Create additional script to fix permissions on startup
 RUN cat >/fix-permissions.sh <<'EOF'
 #!/bin/bash
-# Fix xrdp permissions for root access
-echo "Fixing xrdp permissions..."
+# Fix xrdp permissions for Windows 11 compatibility
+echo "Fixing xrdp permissions for Windows 11..."
 
 # Allow root in xrdp
 sed -i 's/^#*allow_root=.*/allow_root=true/g' /etc/xrdp/xrdp.ini
 sed -i 's/^#*allow_console=.*/allow_console=true/g' /etc/xrdp/xrdp.ini
 sed -i 's/^#*disable_root_login=.*/disable_root_login=false/g' /etc/xrdp/xrdp.ini
+sed -i 's/^#*rdp_ssl=.*/rdp_ssl=yes/g' /etc/xrdp/xrdp.ini
+sed -i 's/^#*rdp_use_ssl=.*/rdp_use_ssl=yes/g' /etc/xrdp/xrdp.ini
 
 # Allow root in sesman
 sed -i 's/^#*AllowRootLogin=.*/AllowRootLogin=true/g' /etc/xrdp/sesman.ini
 sed -i 's/^#*RootLoginAllowed=.*/RootLoginAllowed=true/g' /etc/xrdp/sesman.ini
-sed -i 's/^#*DisableAuthentication=.*/DisableAuthentication=true/g' /etc/xrdp/sesman.ini
+sed -i 's/^#*EnableRemoteLogin=.*/EnableRemoteLogin=true/g' /etc/xrdp/sesman.ini
 
 # Set proper permissions
 chmod 755 /etc/xrdp/*.ini
 chmod 755 /etc/xrdp/startwm.sh
 chmod 600 /root/.Xauthority
+chmod 600 /etc/xrdp/xrdp-key.pem
+chmod 644 /etc/xrdp/xrdp-cert.pem
 
 echo "Permissions fixed successfully!"
+echo "SSL certificate generated for Windows 11"
 EOF
 
 RUN chmod +x /fix-permissions.sh
