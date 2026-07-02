@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add i386 architecture for 32-bit support
 RUN dpkg --add-architecture i386
 
-# Install all required packages
+# Install all required packages - REMOVED policykit-1
 RUN apt-get update && apt-get install -y \
 xrdp \
 xfce4 \
@@ -47,7 +47,6 @@ telnet \
 ltrace \
 strace \
 openssl \
-policykit-1 \
 pamix \
 libpam-modules \
 && apt-get clean \
@@ -178,7 +177,7 @@ RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/xrdp/xrdp-key.pem -ou
     chmod 600 /etc/xrdp/xrdp-key.pem && \
     chmod 644 /etc/xrdp/xrdp-cert.pem
 
-# CRITICAL: Disable polkit for xrdp
+# Disable polkit for xrdp
 RUN rm -f /etc/polkit-1/localauthority/50-local.d/*.pkla 2>/dev/null || true && \
     rm -f /etc/polkit-1/localauthority/10-vendor.d/*.pkla 2>/dev/null || true
 
