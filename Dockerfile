@@ -33,8 +33,8 @@ x11-utils \
 xauth \
 pm-utils \
 xserver-xorg-video-dummy \
-fuse \
-libfuse2 \
+xserver-xorg-core \
+x11-xserver-utils \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
@@ -51,9 +51,10 @@ RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 # Set default session
 RUN echo "xfce4-session" > /root/.xsession
 
-# Fix xrdp startup script
+# Fix xrdp startup script - CRITICAL FIX
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
+# XRDP startwm.sh for XFCE
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 export XDG_CURRENT_DESKTOP=XFCE
@@ -63,9 +64,11 @@ export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
 export DISABLE_WAYLAND=1
 export XDG_RUNTIME_DIR=/run/user/0
 
+# Create runtime directory
 mkdir -p /run/user/0
 chmod 700 /run/user/0
 
+# Start XFCE
 exec startxfce4
 EOF
 
@@ -77,14 +80,7 @@ RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
 RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
 
-# Enable mount support in sesman.ini
-RUN if [ -f /etc/xrdp/sesman.ini ]; then \
-    sed -i 's/^#.*FuseMountName=.*/FuseMountName=thinclient_drives/g' /etc/xrdp/sesman.ini; \
-    sed -i 's#^#.*FuseMountPath=.*#FuseMountPath=/tmp/thinclient_drives#g' /etc/xrdp/sesman.ini; \
-    sed -i 's/^#.*EnableFuseMount=.*/EnableFuseMount=true/g' /etc/xrdp/sesman.ini; \
-    fi
-
-# Create Xorg configuration
+# Create Xorg configuration - FIXED
 RUN mkdir -p /etc/X11/xrdp
 RUN cat >/etc/X11/xrdp/xorg.conf <<'EOF'
 Section "Device"
@@ -116,6 +112,10 @@ EndSection
 Section "ServerLayout"
     Identifier  "default"
     Screen      "default"
+    Option      "BlankTime" "0"
+    Option      "StandbyTime" "0"
+    Option      "SuspendTime" "0"
+    Option      "OffTime" "0"
 EndSection
 EOF
 
@@ -144,10 +144,8 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=false
 EOF
 
-# Create necessary directories with mount support
+# Create necessary directories
 RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp /run/user/0
-RUN mkdir -p /tmp/thinclient_drives
-RUN chmod 755 /tmp/thinclient_drives
 
 # Create pulse client config
 RUN mkdir -p /etc/pulse
@@ -162,7 +160,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# Create start script with mount support
+# Create start script with fixes
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -186,6 +184,7 @@ touch /root/.Xauthority && chmod 600 /root/.Xauthority
 echo "Cleaning up stale files..."
 rm -f /run/dbus/pid /var/run/dbus/pid /tmp/.X0-lock /tmp/.X11-unix/X0
 rm -f /var/run/xrdp/xrdp.pid /var/run/xrdp-sesman/xrdp-sesman.pid /run/pulse/pid
+rm -f /tmp/.X11-unix/X10  # Remove display 10 lock
 
 # Kill leftover processes
 echo "Cleaning up processes..."
@@ -195,10 +194,6 @@ pkill -x xrdp-sesman 2>/dev/null || true
 pkill -x xrdp 2>/dev/null || true
 pkill -x Xorg 2>/dev/null || true
 sleep 2
-
-# Mount /proc and /sys for fuse support
-mount -t proc proc /proc 2>/dev/null || true
-mount -t sysfs sys /sys 2>/dev/null || true
 
 # Start dbus
 echo "[1/4] Starting dbus-daemon..."
@@ -213,11 +208,18 @@ pulseaudio --start --daemonize --exit-idle-time=-1 2>/dev/null || echo "⚠ Puls
 sleep 1
 echo "✓ pulseaudio configured"
 
-# Start xrdp-sesman with mount support
+# Start xrdp-sesman
 echo "[3/4] Starting xrdp-sesman..."
 /usr/sbin/xrdp-sesman --nodaemon &
+SESMAN_PID=$!
 sleep 3
-echo "✓ xrdp-sesman started"
+
+if ps -p $SESMAN_PID > /dev/null 2>&1; then
+    echo "✓ xrdp-sesman started (PID: $SESMAN_PID)"
+else
+    echo "✗ ERROR: xrdp-sesman failed to start"
+    exit 1
+fi
 
 # Start xrdp
 echo "[4/4] Starting xrdp on port 3389..."
@@ -226,7 +228,6 @@ echo "✓ XRDP Server is ready!"
 echo "  Connect to: localhost:3389"
 echo "  Username: root"
 echo "  Password: ja908070"
-echo "  Mount support: Enabled"
 echo "========================================="
 
 exec /usr/sbin/xrdp --nodaemon
