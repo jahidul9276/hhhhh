@@ -87,7 +87,6 @@ auth        sufficient    pam_permit.so
 auth        required      pam_env.so
 account     sufficient    pam_permit.so
 session     sufficient    pam_permit.so
-session     optional      pam_motd.so
 PAMEOF
 
 RUN cat > /etc/pam.d/xrdp <<'PAMEOF'
@@ -115,6 +114,125 @@ Action=*
 ResultAny=yes
 ResultInactive=yes
 ResultActive=yes
+EOF
+
+# Create sesman.ini with DisableAuthentication
+RUN cat > /etc/xrdp/sesman.ini <<'EOF'
+[Globals]
+ListenAddress=127.0.0.1
+ListenPort=3350
+EnableUserWindowManager=true
+UserWindowManager=startwm.sh
+DefaultWindowManager=startwm.sh
+AllowRootLogin=true
+AllowConsoleLogin=true
+RootLoginAllowed=true
+DisableAuthentication=true
+EnableRemoteLogin=true
+AlwaysGroupCheck=false
+FuseMountName=thinclient_drives
+SessionTimeout=0
+DisconnectedTimeLimit=0
+IdleTimeLimit=0
+KillDisconnected=false
+XDisplay=10
+DisplayOffset=10
+MaxDisplayNumber=50
+UseXOrg=1
+X11rdpPath=/usr/lib/xorg/Xorg
+
+[X11rdp]
+param=Xorg
+param=-config
+param=xrdp/xorg.conf
+param=-noreset
+param=-nolisten
+param=tcp
+param=-logfile
+param=.xorgxrdp.%s.log
+
+[Chansrv]
+FuseMountName=thinclient_drives
+
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=50
+KillDisconnected=false
+IdleTimeLimit=0
+DisconnectedTimeLimit=0
+EOF
+
+# Create xrdp.ini
+RUN cat > /etc/xrdp/xrdp.ini <<'EOF'
+[Globals]
+ini_version=1
+fork=true
+port=3389
+use_vsock=false
+tcp_nodelay=true
+tcp_keepalive=true
+security_layer=negotiate
+crypt_level=low
+max_bpp=16
+xserverbpp=16
+codecs=
+allow_root=true
+allow_console=true
+enable_token_login=false
+disable_root_login=false
+rdp_ssl=yes
+ssl_cert_file=/etc/xrdp/xrdp-cert.pem
+ssl_key_file=/etc/xrdp/xrdp-key.pem
+ssl_verify=no
+rdp_use_ssl=yes
+crypto_use_fips=false
+tcp_send_buffer_bytes=262144
+tcp_recv_buffer_bytes=262144
+max_connections=100
+rdp_enhanced_security=yes
+tls_min_version=1.0
+tls_max_version=1.3
+
+[Xorg]
+name=Xorg
+lib=libxup.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+xserverbpp=16
+codecs=
+security_layer=negotiate
+crypt_level=low
+max_bpp=16
+
+[X11rdp]
+name=X11rdp
+lib=libxup.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+xserverbpp=16
+codecs=
+security_layer=negotiate
+crypt_level=low
+max_bpp=16
+
+[Chansrv]
+name=Chansrv
+lib=libchansrv.so
+username=root
+password=ja908070
+ip=127.0.0.1
+port=-1
+
+[SessionVariables]
+X11DisplayOffset=10
+MaxDisplayNumber=50
+KillDisconnected=false
+IdleTimeLimit=0
+DisconnectedTimeLimit=0
 EOF
 
 # Create Xorg configuration
