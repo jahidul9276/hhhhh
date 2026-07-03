@@ -2,15 +2,11 @@ FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Add i386 architecture for 32-bit support
-RUN dpkg --add-architecture i386
-
-# Install all required packages
 RUN apt-get update && apt-get install -y \
 xrdp \
+tigervnc-standalone-server \
 xfce4 \
 xfce4-goodies \
-xorgxrdp \
 dbus-x11 \
 sudo \
 curl \
@@ -26,59 +22,37 @@ python3-pip \
 python3-venv \
 build-essential \
 ca-certificates \
-wine \
-wine32 \
-libc6:i386 \
 procps \
 iproute2 \
 x11-utils \
 xauth \
-pm-utils \
-xserver-xorg-video-dummy \
-xserver-xorg-core \
-x11-xserver-utils \
-xorg \
-xvfb \
-x11vnc \
-openssh-server \
-dnsutils \
-iputils-ping \
-telnet \
-ltrace \
-strace \
 openssl \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user with sudo privileges
-RUN useradd -m -s /bin/bash xrdpuser && \
-    echo "xrdpuser:ja908070" | chpasswd && \
-    echo "xrdpuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
 # Set root password
 RUN echo "root:ja908070" | chpasswd
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp /run/user/1000 /tmp/.X11-unix /var/log/xrdp
-RUN chmod 1777 /tmp/.X11-unix
-RUN chmod 700 /run/user/1000
-RUN chmod 755 /var/run/xrdp /var/run/xrdp-sesman
-
-# Create Xauthority files
-RUN touch /root/.Xauthority /home/xrdpuser/.Xauthority && \
-    chmod 600 /root/.Xauthority /home/xrdpuser/.Xauthority && \
-    chown xrdpuser:xrdpuser /home/xrdpuser/.Xauthority
-
-# Configure X11 wrapper
-RUN mkdir -p /etc/X11
-RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
-
-# Set default session for both users
+# Set default session
 RUN echo "xfce4-session" > /root/.xsession
-RUN echo "xfce4-session" > /home/xrdpuser/.xsession && \
-    chown xrdpuser:xrdpuser /home/xrdpuser/.xsession
 
-# CRITICAL: Create COMPLETE xrdp configuration
+# xrdp startup script (runs inside the Xvnc-backed session)
+RUN cat >/etc/xrdp/startwm.sh <<'EOF'
+#!/bin/sh
+unset DBUS_SESSION_BUS_ADDRESS
+unset XDG_RUNTIME_DIR
+export XDG_CURRENT_DESKTOP=XFCE
+export XDG_MENU_PREFIX=xfce-
+export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
+export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
+export XDG_RUNTIME_DIR=/tmp
+exec startxfce4
+EOF
+RUN chmod +x /etc/xrdp/startwm.sh
+
+# ---- xrdp.ini: keep ONLY the Xvnc session type ----
+# (No Xorg/X11rdp entries -- those require kernel/device access this
+#  container doesn't have. Xvnc is pure userspace, no privilege needed.)
 RUN cat >/etc/xrdp/xrdp.ini <<'EOF'
 [Globals]
 ini_version=1
@@ -91,64 +65,21 @@ security_layer=negotiate
 crypt_level=high
 max_bpp=32
 xserverbpp=32
-codecs=
 allow_root=true
 allow_console=true
-enable_token_login=false
-disable_root_login=false
 rdp_ssl=yes
 ssl_cert_file=/etc/xrdp/xrdp-cert.pem
 ssl_key_file=/etc/xrdp/xrdp-key.pem
-ssl_verify=no
-rdp_use_ssl=yes
-crypto_use_fips=false
-tcp_send_buffer_bytes=262144
-tcp_recv_buffer_bytes=262144
-max_connections=100
-rdp_enhanced_security=yes
 tls_min_version=1.2
 tls_max_version=1.3
 
-[Xorg]
-name=Xorg
-lib=libxup.so
-username=root
-password=ja908070
+[Xvnc]
+name=Xvnc
+lib=libvnc.so
+username=ask
+password=ask
 ip=127.0.0.1
 port=-1
-xserverbpp=32
-codecs=
-security_layer=negotiate
-crypt_level=high
-max_bpp=32
-
-[X11rdp]
-name=X11rdp
-lib=libxup.so
-username=root
-password=ja908070
-ip=127.0.0.1
-port=-1
-xserverbpp=32
-codecs=
-security_layer=negotiate
-crypt_level=high
-max_bpp=32
-
-[Chansrv]
-name=Chansrv
-lib=libchansrv.so
-username=root
-password=ja908070
-ip=127.0.0.1
-port=-1
-
-[SessionVariables]
-X11DisplayOffset=10
-MaxDisplayNumber=50
-KillDisconnected=false
-IdleTimeLimit=0
-DisconnectedTimeLimit=0
 EOF
 
 # Generate SSL certificates
@@ -156,25 +87,7 @@ RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/xrdp/xrdp-key.pem -ou
     chmod 600 /etc/xrdp/xrdp-key.pem && \
     chmod 644 /etc/xrdp/xrdp-cert.pem
 
-# CRITICAL: Remove ALL security policies
-RUN rm -f /etc/polkit-1/localauthority/50-local.d/*.pkla 2>/dev/null || true && \
-    rm -f /etc/polkit-1/localauthority/10-vendor.d/*.pkla 2>/dev/null || true
-
-# CRITICAL: Disable polkit for xrdp
-RUN mkdir -p /etc/polkit-1/localauthority/50-local.d && \
-    cat >/etc/polkit-1/localauthority/50-local.d/99-xrdp.pkla <<'EOF'
-[Allow xrdp]
-Identity=unix-user:*
-Action=*
-ResultAny=yes
-ResultInactive=yes
-ResultActive=yes
-EOF
-
-# CRITICAL: Create sesman configuration
-# NOTE: root-login control belongs in the [Security] section.
-# Anything placed under the wrong section is silently ignored by xrdp-sesman,
-# which is why root login was being rejected ("User is not authorized").
+# ---- sesman.ini: AllowRootLogin belongs in [Security]; Xvnc params in [Xvnc] ----
 RUN cat >/etc/xrdp/sesman.ini <<'EOF'
 [Globals]
 ListenAddress=127.0.0.1
@@ -182,13 +95,10 @@ ListenPort=3350
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
-ReconnectSh=reconnectwm.sh
 
 [Security]
 AllowRootLogin=true
 MaxLoginRetry=4
-TerminalServerUsers=tsusers
-TerminalServerAdmins=tsadmins
 AlwaysGroupCheck=false
 
 [Sessions]
@@ -204,152 +114,85 @@ LogFile=xrdp-sesman.log
 LogLevel=DEBUG
 EnableSyslog=true
 
-[X11rdp]
-param=Xorg
-param=-config
-param=xrdp/xorg.conf
-param=-noreset
+[Xvnc]
+param=Xvnc
+param=-bs
 param=-nolisten
 param=tcp
-param=-logfile
-param=.xorgxrdp.%s.log
+param=-localhost
+param=-dpi
+param=96
 
 [Chansrv]
 FuseMountName=thinclient_drives
-
-[SessionVariables]
-KillDisconnected=false
-IdleTimeLimit=0
-DisconnectedTimeLimit=0
 EOF
 
-# Create Xorg configuration
-RUN mkdir -p /etc/X11/xorg.conf.d
-RUN cat >/etc/X11/xorg.conf.d/99-dummy.conf <<'EOF'
-Section "Device"
-    Identifier  "DummyDevice"
-    Driver      "dummy"
-    Option      "ConstantDPI" "true"
-    Option      "NoDDC" "true"
-    Option      "IgnoreEDID" "true"
-    Option      "UseDisplayDevice" "none"
-    Option      "NoRandR" "false"
-    VideoRam    256000
-EndSection
+# Create necessary directories
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp
 
-Section "Monitor"
-    Identifier  "DummyMonitor"
-    HorizSync   28-80
-    VertRefresh 43-60
-    Option      "DPMS" "false"
-    Option      "Enable" "true"
-    Option      "PreferredMode" "1920x1080"
-EndSection
-
-Section "Screen"
-    Identifier  "DummyScreen"
-    Device      "DummyDevice"
-    Monitor     "DummyMonitor"
-    DefaultDepth 32
-    SubSection "Display"
-        Depth 32
-        Modes "1920x1080" "1280x720" "1024x768" "800x600"
-    EndSubSection
-EndSection
-
-Section "ServerLayout"
-    Identifier  "DummyLayout"
-    Screen      "DummyScreen"
-    Option      "BlankTime" "0"
-    Option      "StandbyTime" "0"
-    Option      "SuspendTime" "0"
-    Option      "OffTime" "0"
-EndSection
-EOF
-
-# Create startwm.sh
-RUN cat >/etc/xrdp/startwm.sh <<'EOF'
-#!/bin/sh
-# XRDP startwm.sh
-unset DBUS_SESSION_BUS_ADDRESS
-unset XDG_RUNTIME_DIR
-export XDG_CURRENT_DESKTOP=XFCE
-export XDG_MENU_PREFIX=xfce-
-export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
-export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share:/usr/local/share
-export DISABLE_WAYLAND=1
-export XDG_RUNTIME_DIR=/run/user/1000
-export XAUTHORITY=/home/xrdpuser/.Xauthority
-export HOME=/home/xrdpuser
-export USER=xrdpuser
-export SHELL=/bin/bash
-export DISPLAY=:10
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
-
-# Create runtime directory
-mkdir -p /run/user/1000
-chmod 700 /run/user/1000
-
-# Clean up display locks
-rm -f /tmp/.X0-lock /tmp/.X10-lock /tmp/.X11-unix/X0 /tmp/.X11-unix/X10
-
-# Start DBus session
-if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
-    eval `dbus-launch --sh-syntax --exit-with-session`
-    export DBUS_SESSION_BUS_ADDRESS
-fi
-
-# Start XFCE
-exec startxfce4
-EOF
-
-RUN chmod +x /etc/xrdp/startwm.sh
-
-# Remove light-locker and power manager
-RUN apt-get remove -y light-locker xfce4-power-manager || true
-
-# Disable screensaver and power management
-RUN mkdir -p /home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml
-RUN cat >/home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfce4-power-manager" version="1.0">
-  <property name="xfce4-power-manager" type="empty">
-    <property name="blank-on-ac" type="int" value="0"/>
-    <property name="blank-on-battery" type="int" value="0"/>
-    <property name="dpms-enabled" type="bool" value="false"/>
-    <property name="lock-screen-suspend-hibernate" type="bool" value="false"/>
-  </property>
-</channel>
-EOF
-
-RUN chown -R xrdpuser:xrdpuser /home/xrdpuser/.config
-
-# Disable screensaver
-RUN cat >/home/xrdpuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfce4-screensaver" version="1.0">
-  <property name="enabled" type="bool" value="false"/>
-  <property name="lock-enabled" type="bool" value="false"/>
-</channel>
-EOF
-
-# Create pulse client configuration
+# Pulse client config
 RUN mkdir -p /etc/pulse
 RUN cat >/etc/pulse/client.conf <<'EOF'
 default-server = /run/pulse/native
 autospawn = no
 daemon-binary = /usr/bin/pulseaudio
-extra-arguments = --exit-idle-time=-1 --disable-shm=yes --realtime=no
-cookie-file = /home/xrdpuser/.config/pulse/cookie
+extra-arguments = --exit-idle-time=-1
+cookie-file = /root/.config/pulse/cookie
 enable-shm = no
 disable-shm = yes
 EOF
 
-# Copy the runtime start script (kept separate for readability/maintenance)
-COPY start.sh /start.sh
+# Start script
+RUN cat >/start.sh <<'EOF'
+#!/bin/bash
+set -e
+
+echo "========================================="
+echo "Starting XRDP Container Services (Xvnc backend)"
+echo "========================================="
+
+mkdir -p /run/dbus /var/run/dbus /run/pulse /var/run/xrdp /var/run/xrdp-sesman
+mkdir -p /root/.config/pulse /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
+
+echo "Cleaning up stale PID files..."
+rm -f /run/dbus/pid /var/run/dbus/pid /tmp/.X0-lock
+rm -f /var/run/xrdp/xrdp.pid /var/run/xrdp-sesman/xrdp-sesman.pid /run/pulse/pid
+
+echo "Cleaning up leftover processes..."
+pkill -x dbus-daemon 2>/dev/null || true
+pkill -x pulseaudio 2>/dev/null || true
+pkill -x xrdp-sesman 2>/dev/null || true
+pkill -x xrdp 2>/dev/null || true
+pkill -x Xvnc 2>/dev/null || true
+sleep 2
+
+echo "[1/4] Starting dbus-daemon..."
+dbus-daemon --system --fork
+sleep 1
+pgrep -x dbus-daemon >/dev/null && echo "✓ dbus-daemon started" || { echo "✗ dbus-daemon failed"; exit 1; }
+
+echo "[2/4] Starting pulseaudio..."
+export PULSE_RUNTIME_PATH=/run/pulse
+pulseaudio --start --daemonize --exit-idle-time=-1 2>/dev/null || echo "⚠ pulseaudio failed, continuing..."
+
+echo "[3/4] Starting xrdp-sesman..."
+/usr/sbin/xrdp-sesman --nodaemon &
+SESMAN_PID=$!
+sleep 3
+ps -p $SESMAN_PID >/dev/null 2>&1 && echo "✓ xrdp-sesman started (PID: $SESMAN_PID)" || { echo "✗ xrdp-sesman failed"; tail -30 /var/log/xrdp-sesman.log 2>/dev/null; exit 1; }
+
+echo "[4/4] Starting xrdp on port 3389..."
+echo "========================================="
+echo "✓ XRDP Server is ready! (Xvnc backend, no privilege required)"
+echo "  Connect to: <your-railway-domain>:3389 (TCP proxy) or localhost:3389"
+echo "  Username:   root"
+echo "  Password:   ja908070"
+echo "========================================="
+
+exec /usr/sbin/xrdp --nodaemon
+EOF
 RUN chmod +x /start.sh
 
 EXPOSE 3389
-
 CMD ["/start.sh"]
