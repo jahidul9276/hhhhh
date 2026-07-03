@@ -47,7 +47,6 @@ telnet \
 ltrace \
 strace \
 openssl \
-policykit-1 \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/*
 
