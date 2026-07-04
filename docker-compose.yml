@@ -9,13 +9,11 @@ services:
     restart: unless-stopped
     environment:
       - DISPLAY=:0
-      - XDG_RUNTIME_DIR=/tmp
-      - PULSE_RUNTIME_PATH=/run/pulse
+      - XDG_RUNTIME_DIR=/run/user/0
       - PULSE_SERVER=unix:/run/pulse/native
       - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /run/user/1000/pulse:/run/pulse/host:ro
       - xrdp-data:/var/lib/xrdp
       - dbus-data:/run/dbus
       - pulse-data:/run/pulse
@@ -25,9 +23,11 @@ services:
       - NET_ADMIN
       - IPC_LOCK
       - SYS_CHROOT
+      - SETUID
+      - SETGID
     security_opt:
       - apparmor:unconfined
-      - seccomp=unconfined
+      - seccomp:unconfined
     devices:
       - /dev/snd:/dev/snd:rw
       - /dev/dri:/dev/dri:rw
