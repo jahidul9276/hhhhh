@@ -1,81 +1,91 @@
-FROM debian:trixie
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Add i386 architecture for Wine
 RUN dpkg --add-architecture i386
 
+# Install all required packages
 RUN apt-get update && apt-get install -y \
-xrdp \
-xfce4 \
-xfce4-goodies \
-xorgxrdp \
-dbus-x11 \
-sudo \
-curl \
-wget \
-nano \
-net-tools \
-polkitd \
-pulseaudio \
-pulseaudio-utils \
-firefox-esr \
-python3 \
-python3-pip \
-python3-venv \
-build-essential \
-ca-certificates \
-wine \
-wine32 \
-libc6:i386 \
-procps \
-iproute2 \
-x11-utils \
-xauth \
-pm-utils \
-lightdm \
-&& apt-get clean \
-&& rm -rf /var/lib/apt/lists/*
+    xrdp \
+    xfce4 \
+    xfce4-goodies \
+    xorgxrdp \
+    dbus-x11 \
+    sudo \
+    curl \
+    wget \
+    nano \
+    net-tools \
+    policykit-1 \
+    pulseaudio \
+    pulseaudio-utils \
+    firefox-esr \
+    python3 \
+    python3-pip \
+    python3-venv \
+    build-essential \
+    ca-certificates \
+    wine \
+    wine32 \
+    libc6:i386 \
+    procps \
+    iproute2 \
+    x11-utils \
+    xauth \
+    pm-utils \
+    lightdm \
+    tzdata \
+    locales \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set timezone and locales
+RUN ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata
 
 # Set root password
 RUN echo "root:ja908070" | chpasswd
 
+# Create necessary directories
+RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp /var/log/xrdp
+
 # Configure X11
-RUN mkdir -p /etc/X11
 RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 
-# Set default session
+# Set default X session
 RUN echo "xfce4-session" > /root/.xsession
 
-# Fix xrdp startup script
+# Create XRDP startup script with proper XFCE configuration
 RUN cat >/etc/xrdp/startwm.sh <<'EOF'
 #!/bin/sh
+# XRDP XFCE startup script for container
 unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
+
 export XDG_CURRENT_DESKTOP=XFCE
 export XDG_MENU_PREFIX=xfce-
 export XDG_CONFIG_DIRS=/etc/xdg/xfce4:/etc/xdg
 export XDG_DATA_DIRS=/usr/share/xfce4:/usr/share
-# Disable services that cause warnings in containers
+
+# Disable problematic services
 export DISABLE_WAYLAND=1
 export XDG_RUNTIME_DIR=/tmp
+
+# Start XFCE
 exec startxfce4
 EOF
 
 RUN chmod +x /etc/xrdp/startwm.sh
 
-# Configure xrdp
-RUN sed -i 's/^#.*port=3389/port=3389/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*use_vsock=.*/use_vsock=false/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini
-RUN sed -i 's/^#.*crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
+# Configure XRDP
+RUN sed -i 's/^port=3389/port=3389/g' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^use_vsock=true/use_vsock=false/g' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^security_layer=.*/security_layer=negotiate/g' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^#*max_bpp=.*/max_bpp=32/g' /etc/xrdp/xrdp.ini
 
-# Disable light-locker to avoid /proc warnings
-RUN apt-get remove -y light-locker || true
-
-# Create necessary directories
-RUN mkdir -p /var/run/xrdp /var/run/xrdp-sesman /run/dbus /run/pulse /var/lib/xrdp
-
-# Create pulse client config
+# Create PulseAudio configuration
 RUN mkdir -p /etc/pulse
 RUN cat >/etc/pulse/client.conf <<'EOF'
 # PulseAudio client configuration
@@ -88,7 +98,7 @@ enable-shm = no
 disable-shm = yes
 EOF
 
-# Create start script with fixes for container warnings
+# Create main startup script with proper service ordering
 RUN cat >/start.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -97,21 +107,17 @@ echo "========================================="
 echo "Starting XRDP Container Services"
 echo "========================================="
 
-# Create runtime directories
-mkdir -p /run/dbus
-mkdir -p /var/run/dbus
-mkdir -p /run/pulse
-mkdir -p /var/run/xrdp
-mkdir -p /var/run/xrdp-sesman
-mkdir -p /root/.config/pulse
-mkdir -p /tmp/.X11-unix
+# Create runtime directories with proper permissions
+mkdir -p /run/dbus /var/run/dbus /run/pulse
+mkdir -p /var/run/xrdp /var/run/xrdp-sesman
+mkdir -p /root/.config/pulse /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
+chmod 755 /run/pulse
 
-# Clean up stale PID files
-echo "Cleaning up stale PID files..."
-rm -f /run/dbus/pid
-rm -f /var/run/dbus/pid
-rm -f /tmp/.X0-lock
+# Clean up stale files
+echo "Cleaning up stale files..."
+rm -f /run/dbus/pid /var/run/dbus/pid
+rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
 rm -f /var/run/xrdp/xrdp.pid
 rm -f /var/run/xrdp-sesman/xrdp-sesman.pid
 rm -f /run/pulse/pid
@@ -124,37 +130,36 @@ pkill -x xrdp-sesman 2>/dev/null || true
 pkill -x xrdp 2>/dev/null || true
 sleep 2
 
-# Start dbus
+# Start D-Bus
 echo "[1/4] Starting dbus-daemon..."
 dbus-daemon --system --fork
-sleep 1
+sleep 2
 
 if pgrep -x "dbus-daemon" > /dev/null; then
     echo "✓ dbus-daemon started (PID: $(pgrep -x dbus-daemon))"
 else
-    echo "✗ ERROR: dbus-daemon failed to start"
-    exit 1
+    echo "⚠ WARNING: dbus-daemon failed to start"
 fi
 
-# Start pulseaudio with proper configuration for containers
+# Start PulseAudio
 echo "[2/4] Starting pulseaudio..."
 if ! pgrep -x "pulseaudio" > /dev/null; then
-    # Fix for pulseaudio in containers
     export PULSE_RUNTIME_PATH=/run/pulse
-    pulseaudio --start --daemonize --exit-idle-time=-1 2>/dev/null || echo "⚠ Pulseaudio start failed, continuing..."
-    sleep 1
+    pulseaudio --start --daemonize --exit-idle-time=-1 -vvvv 2>&1 | tee /var/log/pulse.log || true
+    sleep 2
     if pgrep -x "pulseaudio" > /dev/null; then
         echo "✓ pulseaudio started (PID: $(pgrep -x pulseaudio))"
     else
-        echo "⚠ pulseaudio not running (continuing anyway)"
-        # Create a dummy pulse socket to avoid connection refused
+        echo "⚠ WARNING: pulseaudio failed to start"
+        echo "   Check /var/log/pulse.log for details"
+        # Create dummy socket to prevent errors
         touch /run/pulse/native
     fi
 else
     echo "✓ pulseaudio already running"
 fi
 
-# Start xrdp-sesman
+# Start XRDP session manager
 echo "[3/4] Starting xrdp-sesman..."
 /usr/sbin/xrdp-sesman --nodaemon &
 SESMAN_PID=$!
@@ -167,7 +172,7 @@ else
     exit 1
 fi
 
-# Start xrdp
+# Start XRDP
 echo "[4/4] Starting xrdp on port 3389..."
 echo "========================================="
 echo "✓ XRDP Server is ready!"
@@ -181,6 +186,9 @@ exec /usr/sbin/xrdp --nodaemon
 EOF
 
 RUN chmod +x /start.sh
+
+# Create symlink for systemd (optional)
+RUN ln -sf /start.sh /usr/local/bin/start-xrdp
 
 EXPOSE 3389
 
